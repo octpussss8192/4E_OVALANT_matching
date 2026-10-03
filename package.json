@@ -1,0 +1,21 @@
+{
+  "name": "4e-ovalant-matching",
+  "version": "1.0.0",
+  "description": "3x3 Survival Game Matching Engine & CLI Debugger",
+  "type": "module",
+  "scripts": {
+    "test": "node --experimental-strip-types src/cli.ts",
+    "interactive": "node --experimental-strip-types src/cli.ts --interactive"
+  },
+  "keywords": [
+    "matching",
+    "survival-game",
+    "3x3"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "typescript": "^7.0.2"
+  }
+}
