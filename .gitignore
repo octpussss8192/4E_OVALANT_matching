@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# Node / TypeScript
+node_modules/
+typescript/node_modules/
+*.tsbuildinfo
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Agent Skills
+.agents/
+.claude/
+agent/
+skills-lock.json
