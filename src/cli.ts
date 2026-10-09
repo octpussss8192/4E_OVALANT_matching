@@ -48,8 +48,17 @@ async function interactiveMode() {
         const prefInput = (await promptQuestion(rl, '希望 [1: Open(他と合流OK) / 2: Closed(貸切)]: ')).trim();
         const pref: MatchingPreference = prefInput === '2' ? 'closed' : 'open';
 
-        const g = engine.registerEntry(leaderName, teamName, count, pref);
-        console.log(`✅ エントリー完了: [整理券番号 #${g.entryNumber}] ${g.teamName} (${g.memberCount}名 / ${g.preference})`);
+        if (pref === 'closed' && count !== 6) {
+          console.log('❌ 貸切（Closed）は3 vs 3対戦のため、ちょうど6名である必要があります。');
+          break;
+        }
+
+        try {
+          const g = engine.registerEntry(leaderName, teamName, count, pref);
+          console.log(`✅ エントリー完了: [整理券番号 #${g.entryNumber}] ${g.teamName} (${g.memberCount}名 / ${g.preference})`);
+        } catch (err: any) {
+          console.log(`❌ エラー: ${err.message}`);
+        }
         break;
       }
 
@@ -68,9 +77,9 @@ async function interactiveMode() {
           const type = m.isClosedMatch ? '貸切' : '通常';
           let teamStr = '';
           if (m.teams) {
-            const red = m.teams.teamRed.map((g: any) => g.teamName).join('+');
-            const blue = m.teams.teamBlue.map((g: any) => g.teamName).join('+');
-            teamStr = ` | 赤:${red}(${m.teams.teamRedCount}) vs 青:${blue}(${m.teams.teamBlueCount})`;
+            const red = m.teams.teamRed.map((t: any) => `${t.group.teamName}(${t.playerCount}名)`).join(' + ');
+            const blue = m.teams.teamBlue.map((t: any) => `${t.group.teamName}(${t.playerCount}名)`).join(' + ');
+            teamStr = ` | 赤: ${red} (${m.teams.teamRedCount}名) vs 青: ${blue} (${m.teams.teamBlueCount}名)`;
           }
           console.log(`  [${label}]: Match #${m.matchNumber} (${type}/${m.allocatedDurationMinutes}分) -> ${groups}${teamStr}`);
         };
@@ -126,7 +135,7 @@ async function interactiveMode() {
         engine.registerEntry('山田', 'Alpha', 3, 'open');
         engine.registerEntry('佐藤', 'Bravo', 2, 'open');
         engine.registerEntry('鈴木', 'Charlie', 1, 'open');
-        engine.registerEntry('貸切組', 'Delta貸切', 4, 'closed');
+        engine.registerEntry('貸切組', 'Delta貸切', 6, 'closed');
         console.log('投入完了！「2」で状態を確認してください。');
         break;
       }

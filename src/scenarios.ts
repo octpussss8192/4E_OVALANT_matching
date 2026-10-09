@@ -10,8 +10,8 @@ function formatMatch(match: Match | null, label: string): string {
   const durationStr = `${match.allocatedDurationMinutes}分`;
   let teamStr = '';
   if (match.teams) {
-    const red = match.teams.teamRed.map((g) => `${g.teamName}(${g.memberCount})`).join('+');
-    const blue = match.teams.teamBlue.map((g) => `${g.teamName}(${g.memberCount})`).join('+');
+    const red = match.teams.teamRed.map((t) => `${t.group.teamName}(${t.playerCount}名)`).join(' + ');
+    const blue = match.teams.teamBlue.map((t) => `${t.group.teamName}(${t.playerCount}名)`).join(' + ');
     teamStr = ` -> [Red: ${red} (${match.teams.teamRedCount}名) vs Blue: ${blue} (${match.teams.teamBlueCount}名)]`;
   }
   return `  [${label}]: Match #${match.matchNumber} ${typeStr} 計${match.totalPlayers}名 (${durationStr}) : ${groupStrs.join(' + ')}${teamStr}`;
@@ -33,7 +33,7 @@ function printState(engine: MatchingEngine, title: string) {
 
 async function runScenario1_ExactMatch() {
   console.log('\n\n######################################################');
-  console.log('🧪 シナリオ1: 【ぴったり6名マッチング [3名, 2名, 1名] のOpen組】');
+  console.log('🧪 シナリオ1: 【分割なしのぴったり3vs3マッチング [3名, 2名, 1名] のOpen組】');
   console.log('######################################################');
 
   const engine = new MatchingEngine();
@@ -47,11 +47,11 @@ async function runScenario1_ExactMatch() {
 
   console.log('>> Group B (2名, Open) がエントリー');
   engine.registerEntry('佐藤花子', 'チームBravo', 2, 'open', new Date(baseTime.getTime() + 2000));
-  printState(engine, 'Group B 登録後（合計5名: まだ6名に満たないためマッチ保留）');
+  printState(engine, 'Group B 登録後（合計5名: 3vs3厳守のため6名に満たずマッチ保留）');
 
   console.log('>> Group C (1名, Open) がエントリー（合計6名到達！）');
   engine.registerEntry('鈴木一郎', 'ソロプレイヤーCharlie', 1, 'open', new Date(baseTime.getTime() + 3000));
-  printState(engine, 'Group C 登録後 -> [3名+2名+1名] で即座にNext枠にマッチ成立！');
+  printState(engine, 'Group C 登録後 -> [3名] vs [2名+1名] で分割なしの厳密な 3 vs 3 が成立！');
 
   const statusAlpha = engine.getGroupStatus(engine.getAllEntries()[0].id);
   console.log(`📊 チームAlphaのステータス: スロット=${statusAlpha?.slotName}, 予想待ち時間=${statusAlpha?.estimatedWaitMinutes}分`);
@@ -59,27 +59,27 @@ async function runScenario1_ExactMatch() {
 
 async function runScenario2_ClosedAndOpen() {
   console.log('\n\n######################################################');
-  console.log('🧪 シナリオ2: 【Closed（貸切）とOpenの共存 & 試合時間短縮】');
+  console.log('🧪 シナリオ2: 【Closed（貸切6名）とOpenの共存 & 貸切試合時間短縮】');
   console.log('######################################################');
 
   const engine = new MatchingEngine();
   const baseTime = new Date('2026-10-03T11:00:00Z');
 
-  console.log('>> Group 1: 貸切希望 (Closed 4名) がエントリー');
-  engine.registerEntry('本田圭佑', 'チーム貸切X', 4, 'closed', new Date(baseTime.getTime() + 1000));
-  printState(engine, 'ClosedグループがNext枠に単独配分（試合時間は8分に短縮）');
+  console.log('>> Group 1: 貸切希望 (Closed 6名) がエントリー');
+  engine.registerEntry('本田圭佑', 'チーム貸切X', 6, 'closed', new Date(baseTime.getTime() + 1000));
+  printState(engine, 'ClosedグループがNext枠に単独配分（内戦3vs3 / 試合時間は8分に短縮）');
 
-  console.log('>> Group 2: Open (4名) がエントリー');
-  engine.registerEntry('長友佑都', 'チームOpenY', 4, 'open', new Date(baseTime.getTime() + 2000));
+  console.log('>> Group 2: Open (3名) がエントリー');
+  engine.registerEntry('長友佑都', 'チームOpenY', 3, 'open', new Date(baseTime.getTime() + 2000));
 
-  console.log('>> Group 3: Open (2名) がエントリー');
-  engine.registerEntry('三笘薫', 'チームOpenZ', 2, 'open', new Date(baseTime.getTime() + 3000));
-  printState(engine, 'Open同士 [4名+2名=6名] が Next Next枠に割り当て！');
+  console.log('>> Group 3: Open (3名) がエントリー');
+  engine.registerEntry('三笘薫', 'チームOpenZ', 3, 'open', new Date(baseTime.getTime() + 3000));
+  printState(engine, 'Open同士 [3名 vs 3名] が Next Next枠に割り当て！');
 }
 
 async function runScenario3_SuggestTips() {
   console.log('\n\n######################################################');
-  console.log('🧪 シナリオ3: 【サジェストTips機能の動作検証】');
+  console.log('🧪 シナリオ3: 【3vs3即時成立に向けたサジェストTips機能の動作検証】');
   console.log('######################################################');
 
   const engine = new MatchingEngine();
@@ -92,36 +92,29 @@ async function runScenario3_SuggestTips() {
 
   console.log('>> 待機列に 4名 のOpenグループ (チームDelta) がエントリー');
   engine.registerEntry('久保建英', 'チームDelta', 4, 'open', new Date(baseTime.getTime() + 3000));
-  printState(engine, 'Delta (4名) 待機中 -> サジェストTipsに注目');
+  printState(engine, 'Delta (4名) 待機中 -> サジェストTipsに注目（あと2名で3vs3成立）');
 
   console.log('>> Tipsに従い 2名 のOpenグループ (チームEcho) がエントリー');
   engine.registerEntry('堂安律', 'チームEcho', 2, 'open', new Date(baseTime.getTime() + 4000));
 
   console.log('>> 進行中の試合を進める（NextをCurrentへ繰り上げ）');
   engine.advanceMatchLifecycle(new Date(baseTime.getTime() + 5000));
-  printState(engine, '試合進行後: Delta(4名) + Echo(2名) が Next Next枠へ即座にマッチ！');
+  printState(engine, '試合進行後: Delta(4名) + Echo(2名) が分割配分され 3 vs 3 として Next Next枠へ即座にマッチ！');
 }
 
-async function runScenario4_FlexibleMatching() {
+async function runScenario4_GroupSplitting() {
   console.log('\n\n######################################################');
-  console.log('🧪 シナリオ4: 【柔軟マッチング（5名フォールバック・時間経過判定）】');
+  console.log('🧪 シナリオ4: 【グループ分割による3 vs 3編成 [4名組 + 2名組]】');
   console.log('######################################################');
 
-  // テスト用にしきい値を5秒に設定
-  const engine = new MatchingEngine({ flexibleWaitTimeSeconds: 5 });
+  const engine = new MatchingEngine();
   const t0 = new Date('2026-10-03T13:00:00Z');
 
-  console.log('>> Group A (3名, Open) と Group B (2名, Open) がエントリー（計5名）');
-  engine.registerEntry('田中', 'チーム3名', 3, 'open', t0);
-  engine.registerEntry('木村', 'チーム2名', 2, 'open', new Date(t0.getTime() + 1000));
+  console.log('>> Group A (4名, Open) と Group B (2名, Open) がエントリー（計6名）');
+  engine.registerEntry('田中', 'チーム4名組', 4, 'open', t0);
+  engine.registerEntry('木村', 'チーム2名組', 2, 'open', new Date(t0.getTime() + 1000));
 
-  printState(engine, 'エントリー直後（まだ5秒未満なので6人目を待つ）');
-
-  console.log('>> ⏰ 6秒経過... (規定待機時間を超過)');
-  const tFuture = new Date(t0.getTime() + 6000);
-  engine.recalculateSlots(tFuture);
-
-  printState(engine, '6秒経過後: 柔軟マッチングが発動し、計5名 [3名 vs 2名] で試合成立！');
+  printState(engine, 'エントリー後: 4名組が [Red 3名] と [Blue 1名] に分割され、完全な 3 vs 3 が成立！');
 }
 
 async function runScenario5_AdminSkip() {
@@ -152,28 +145,26 @@ async function runScenario5_AdminSkip() {
   console.log(`組1の現在状態: status=${g1.status}, skipReason="${g1.skipReason}", slot=${g1Status?.slotName}`);
 }
 
-async function runScenario6_FifoPriority() {
+async function runScenario6_FivePlusOneSplit() {
   console.log('\n\n######################################################');
-  console.log('🧪 シナリオ6: 【FIFO優先とビンパッキング [4名, 1名, 2名, 1名]】');
+  console.log('🧪 シナリオ6: 【5名グループ＋1名ソロのグループ分割 3 vs 3】');
   console.log('######################################################');
 
   const engine = new MatchingEngine();
   const t0 = new Date('2026-10-03T15:00:00Z');
 
-  console.log('>> 4名(A), 1名(B), 2名(C), 1名(D) が連続エントリー');
-  engine.registerEntry('Aさん', 'チームA(4名)', 4, 'open', new Date(t0.getTime() + 1000));
-  engine.registerEntry('Bさん', 'チームB(1名)', 1, 'open', new Date(t0.getTime() + 2000));
-  engine.registerEntry('Cさん', 'チームC(2名)', 2, 'open', new Date(t0.getTime() + 3000));
-  engine.registerEntry('Dさん', 'チームD(1名)', 1, 'open', new Date(t0.getTime() + 4000));
+  console.log('>> 5名グループ (チームGiant) と 1名ソロ (ソロプレイヤー) がエントリー');
+  engine.registerEntry('大谷', 'チームGiant(5名)', 5, 'open', new Date(t0.getTime() + 1000));
+  engine.registerEntry('ダルビッシュ', 'ソロプレイヤー(1名)', 1, 'open', new Date(t0.getTime() + 2000));
 
-  printState(engine, 'エントリー後: 先頭A(4名)に対して [4名+1名+1名=6名] がFIFO順でマッチ成立！');
+  printState(engine, 'エントリー後: 5名組が [Red 3名] と [Blue 2名] に分割され、ソロ(1名)と合流して 3 vs 3 成立！');
 }
 
 export async function runAllScenarios() {
   await runScenario1_ExactMatch();
   await runScenario2_ClosedAndOpen();
   await runScenario3_SuggestTips();
-  await runScenario4_FlexibleMatching();
+  await runScenario4_GroupSplitting();
   await runScenario5_AdminSkip();
-  await runScenario6_FifoPriority();
+  await runScenario6_FivePlusOneSplit();
 }

@@ -30,11 +30,16 @@ export interface EntryGroup {
 
 export type MatchStatus = 'scheduled' | 'calling' | 'in_progress' | 'finished' | 'cancelled';
 
+export interface TeamMemberAllocation {
+  group: EntryGroup;
+  playerCount: number; // このチームに割り振られた人数
+}
+
 export interface MatchTeamAssignment {
-  teamRed: EntryGroup[];
-  teamBlue: EntryGroup[];
-  teamRedCount: number;
-  teamBlueCount: number;
+  teamRed: TeamMemberAllocation[];
+  teamBlue: TeamMemberAllocation[];
+  teamRedCount: number; // 3名
+  teamBlueCount: number; // 3名
 }
 
 export interface Match {
@@ -53,8 +58,6 @@ export interface Match {
 
 export interface SystemConfig {
   maxPlayersPerMatch: number; // 6名 (3 vs 3)
-  minPlayersFlexibleThreshold: number; // 5名
-  flexibleWaitTimeSeconds: number; // テスト用に秒単位（本番は分）
   standardMatchDurationMinutes: number; // 10分
   closedMatchDurationMinutes: number; // 8分
   turnaroundDurationMinutes: number; // 2分

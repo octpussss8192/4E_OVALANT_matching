@@ -7,6 +7,7 @@ import type {
   QueueDisplayState,
   GroupQueueStatus,
   MatchTeamAssignment,
+  TeamMemberAllocation,
   SuggestionTip,
 } from './types.ts';
 
@@ -18,8 +19,6 @@ export class MatchingEngine {
 
   public config: SystemConfig = {
     maxPlayersPerMatch: 6,
-    minPlayersFlexibleThreshold: 5,
-    flexibleWaitTimeSeconds: 600, // デフォルト10分（テスト時は上書き可能）
     standardMatchDurationMinutes: 10,
     closedMatchDurationMinutes: 8,
     turnaroundDurationMinutes: 2,
@@ -41,6 +40,9 @@ export class MatchingEngine {
   ): EntryGroup {
     if (memberCount < 1 || memberCount > 6) {
       throw new Error('メンバー数は1〜6名である必要があります。');
+    }
+    if (preference === 'closed' && memberCount !== 6) {
+      throw new Error('貸切（Closed）エントリーは3 vs 3対戦のため、ちょうど6名である必要があります。');
     }
 
     const group: EntryGroup = {
@@ -231,25 +233,7 @@ export class MatchingEngine {
       return this.createMatch([targetGroup, ...exactCombo], false, currentTime);
     }
 
-    // Step 2: 6名が作れない場合、先頭の待機時間が閾値を超えているか判定
-    const waitSeconds = (currentTime.getTime() - targetGroup.createdAt.getTime()) / 1000;
-    const isWaitExpired = waitSeconds >= this.config.flexibleWaitTimeSeconds;
-
-    if (isWaitExpired) {
-      // 柔軟マッチング: 合計5名（閾値）での組み合わせを探索
-      const flexibleNeeded = this.config.minPlayersFlexibleThreshold - targetGroup.memberCount;
-      if (flexibleNeeded === 0) {
-        return this.createMatch([targetGroup], false, currentTime);
-      }
-      if (flexibleNeeded > 0) {
-        const flexCombo = this.findSubsetSum(candidatePool, flexibleNeeded);
-        if (flexCombo) {
-          return this.createMatch([targetGroup, ...flexCombo], false, currentTime);
-        }
-      }
-    }
-
-    // 成立しない場合は null（次回の追加や時間経過を待つ）
+    // 6名揃わない場合は成立しない（3 vs 3厳守のため待機）
     return null;
   }
 
@@ -308,32 +292,84 @@ export class MatchingEngine {
   }
 
   /**
-   * 人数をできるだけ均等に赤チーム・青チームへ分割
+   * 3x3（Red 3名 vs Blue 3名）を厳密に編成
+   * 4〜5名グループが存在する場合はグループを分割してでも 3 vs 3 を作る
    */
   private assignTeams(groups: EntryGroup[]): MatchTeamAssignment {
-    const teamRed: EntryGroup[] = [];
-    const teamBlue: EntryGroup[] = [];
-    let redCount = 0;
-    let blueCount = 0;
+    const teamRed: TeamMemberAllocation[] = [];
+    const teamBlue: TeamMemberAllocation[] = [];
 
-    // 人数の大きいグループから順に人数の少ない方のチームへ配分（貪欲法）
-    const sorted = [...groups].sort((a, b) => b.memberCount - a.memberCount);
+    // 単一グループで6名の場合（Closed または 6名Open）
+    if (groups.length === 1 && groups[0].memberCount === 6) {
+      teamRed.push({ group: groups[0], playerCount: 3 });
+      teamBlue.push({ group: groups[0], playerCount: 3 });
+      return {
+        teamRed,
+        teamBlue,
+        teamRedCount: 3,
+        teamBlueCount: 3,
+      };
+    }
 
-    for (const g of sorted) {
-      if (redCount <= blueCount) {
-        teamRed.push(g);
-        redCount += g.memberCount;
-      } else {
-        teamBlue.push(g);
-        blueCount += g.memberCount;
+    // 1. グループを分割せずに 3名 が作れるかチェック（3+3, 2+1+3, 2+1+2+1 など）
+    const findExactThree = (candidates: EntryGroup[]): EntryGroup[] | null => {
+      const res: EntryGroup[] = [];
+      const search = (idx: number, sum: number): boolean => {
+        if (sum === 3) return true;
+        if (sum > 3 || idx >= candidates.length) return false;
+        res.push(candidates[idx]);
+        if (search(idx + 1, sum + candidates[idx].memberCount)) return true;
+        res.pop();
+        if (search(idx + 1, sum)) return true;
+        return false;
+      };
+      return search(0, 0) ? res : null;
+    };
+
+    const exactRed = findExactThree(groups);
+    if (exactRed) {
+      const redIds = new Set(exactRed.map((g) => g.id));
+      for (const g of exactRed) {
+        teamRed.push({ group: g, playerCount: g.memberCount });
       }
+      for (const g of groups) {
+        if (!redIds.has(g.id)) {
+          teamBlue.push({ group: g, playerCount: g.memberCount });
+        }
+      }
+      return {
+        teamRed,
+        teamBlue,
+        teamRedCount: 3,
+        teamBlueCount: 3,
+      };
+    }
+
+    // 2. 分割が必要な場合（4名または5名グループが含まれる場合）
+    // 人数が大きい順にソート
+    const sorted = [...groups].sort((a, b) => b.memberCount - a.memberCount);
+    const largeGroup = sorted[0]; // 4名または5名グループ
+    const others = sorted.slice(1);
+
+    // largeGroupから3名をRedに割り当て
+    teamRed.push({ group: largeGroup, playerCount: 3 });
+
+    // largeGroupの残りをBlueに割り当て
+    const remainingCount = largeGroup.memberCount - 3;
+    if (remainingCount > 0) {
+      teamBlue.push({ group: largeGroup, playerCount: remainingCount });
+    }
+
+    // 残りのグループをすべてBlueに割り当て（合計3名になる）
+    for (const g of others) {
+      teamBlue.push({ group: g, playerCount: g.memberCount });
     }
 
     return {
       teamRed,
       teamBlue,
-      teamRedCount: redCount,
-      teamBlueCount: blueCount,
+      teamRedCount: 3,
+      teamBlueCount: 3,
     };
   }
 
@@ -360,7 +396,7 @@ export class MatchingEngine {
 
   /**
    * サジェストTipsの算出:
-   * 待機中のOpenグループのうち、あと何名いれば即座に6名（あるいは5名）マッチが成立するか
+   * 待機中のOpenグループの合計人数から、3vs3（6名）成立に必要な不足人数を算出
    */
   private calculateSuggestionTip(waitingGroups: EntryGroup[]): SuggestionTip {
     const openWaiting = waitingGroups.filter((g) => g.preference === 'open');
@@ -372,25 +408,20 @@ export class MatchingEngine {
       };
     }
 
-    // 待機先頭から greedy に足していき、6名に対する不足人数を検知
-    let sum = 0;
-    for (const g of openWaiting) {
-      if (sum + g.memberCount <= 6) {
-        sum += g.memberCount;
-      }
-    }
+    const totalWaiting = openWaiting.reduce((acc, g) => acc + g.memberCount, 0);
+    const remainder = totalWaiting % 6;
+    const deficit = (6 - remainder) % 6;
 
-    const deficit = 6 - sum;
-    if (deficit > 0 && deficit <= 6) {
+    if (deficit === 0) {
       return {
-        recommendedPartySize: deficit,
-        message: `現在【${deficit}名】組なら、すぐにご案内可能です！（Open枠）`,
+        recommendedPartySize: 3,
+        message: '現在6名が待機中！まもなく3vs3マッチが成立します。',
       };
     }
 
     return {
-      recommendedPartySize: 2,
-      message: '現在2名組ならマッチングが早くなる可能性が高いです！',
+      recommendedPartySize: deficit,
+      message: `現在【${deficit}名】組なら、すぐにご案内可能です！（3vs3即時成立）`,
     };
   }
 
