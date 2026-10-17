@@ -1,5 +1,6 @@
 /**
  * API client to interact with FastAPI backend
+ * Compatible with Vercel Multi-Services (internal bindings & client rewrites)
  */
 
 import {
@@ -8,10 +9,22 @@ import {
   QueueStatusResponse,
 } from '@/types';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+function getApiBase(): string {
+  // ブラウザ（クライアントサイド）: Vercelのrewrite (/api/(.*) -> backend) 経由で相対パスを利用
+  if (typeof window !== 'undefined') {
+    return '/api';
+  }
+  // サーバーサイド (SSR / Route Handlers): Vercel Binding で注入される BACKEND_URL を利用
+  if (process.env.BACKEND_URL) {
+    return `${process.env.BACKEND_URL}/api`;
+  }
+  // ローカル開発環境のフォールバック
+  return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+}
 
 export async function createEntry(req: CreateEntryRequest): Promise<EntryResponse> {
-  const res = await fetch(`${API_BASE}/entries`, {
+  const apiBase = getApiBase();
+  const res = await fetch(`${apiBase}/entries`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
@@ -24,7 +37,8 @@ export async function createEntry(req: CreateEntryRequest): Promise<EntryRespons
 }
 
 export async function getQueueStatus(): Promise<QueueStatusResponse> {
-  const res = await fetch(`${API_BASE}/status`, {
+  const apiBase = getApiBase();
+  const res = await fetch(`${apiBase}/status`, {
     cache: 'no-store',
   });
   if (!res.ok) {
@@ -34,7 +48,8 @@ export async function getQueueStatus(): Promise<QueueStatusResponse> {
 }
 
 export async function getEntryStatus(entryId: string): Promise<EntryResponse> {
-  const res = await fetch(`${API_BASE}/entries/${entryId}`, {
+  const apiBase = getApiBase();
+  const res = await fetch(`${apiBase}/entries/${entryId}`, {
     cache: 'no-store',
   });
   if (!res.ok) {
@@ -44,7 +59,8 @@ export async function getEntryStatus(entryId: string): Promise<EntryResponse> {
 }
 
 export async function advanceMatch(matchId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/admin/matches/${matchId}/advance`, {
+  const apiBase = getApiBase();
+  const res = await fetch(`${apiBase}/admin/matches/${matchId}/advance`, {
     method: 'POST',
   });
   if (!res.ok) {
@@ -54,7 +70,8 @@ export async function advanceMatch(matchId: string): Promise<void> {
 }
 
 export async function skipEntry(entryId: string, reason: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/admin/entries/${entryId}/skip`, {
+  const apiBase = getApiBase();
+  const res = await fetch(`${apiBase}/admin/entries/${entryId}/skip`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ reason }),
@@ -66,5 +83,6 @@ export async function skipEntry(entryId: string, reason: string): Promise<void> 
 }
 
 export async function resetSystem(): Promise<void> {
-  await fetch(`${API_BASE}/admin/reset`, { method: 'POST' });
+  const apiBase = getApiBase();
+  await fetch(`${apiBase}/admin/reset`, { method: 'POST' });
 }
