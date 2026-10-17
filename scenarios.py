@@ -31,17 +31,24 @@ def format_match_line(match: Optional[Match], label: str) -> str:
         f"{g.team_name}({g.member_count}名/{g.preference.value})"
         for g in match.assigned_groups
     ]
-    match_type = "【貸切/Closed】" if match.is_closed_match else "【通常/Open】"
+    if match.is_staff_assisted:
+        match_type = "【通常/Open(スタッフ助っ人1名)】"
+    elif match.is_closed_match:
+        match_type = "【貸切/Closed】"
+    else:
+        match_type = "【通常/Open】"
+
     duration = f"{match.allocated_duration_minutes}分"
+
+    def format_alloc(t) -> str:
+        if t.is_staff or t.group is None:
+            return f"運営スタッフ({t.player_count}名)"
+        return f"{t.group.team_name}({t.player_count}名)"
 
     team_str = ""
     if match.teams:
-        red_parts = [
-            f"{t.group.team_name}({t.player_count}名)" for t in match.teams.team_red
-        ]
-        blue_parts = [
-            f"{t.group.team_name}({t.player_count}名)" for t in match.teams.team_blue
-        ]
+        red_parts = [format_alloc(t) for t in match.teams.team_red]
+        blue_parts = [format_alloc(t) for t in match.teams.team_blue]
         red_str = " + ".join(red_parts)
         blue_str = " + ".join(blue_parts)
         team_str = f" -> [Red: {red_str} ({match.teams.team_red_count}名) vs Blue: {blue_str} ({match.teams.team_blue_count}名)]"

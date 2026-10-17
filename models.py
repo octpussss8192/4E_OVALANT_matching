@@ -57,8 +57,9 @@ class EntryGroup:
 @dataclass
 class TeamAllocation:
     """チーム（赤または青）内のグループと参加人数"""
-    group: EntryGroup
-    player_count: int  # このチームに所属する人数（グループ分割時は元の人数より少なくなります）
+    group: Optional[EntryGroup]  # 運営スタッフの場合はNoneまたは専用オブジェクト
+    player_count: int            # このチームに所属する人数
+    is_staff: bool = False       # 運営スタッフ助っ人フラグ
 
 
 @dataclass
@@ -79,8 +80,9 @@ class Match:
     is_closed_match: bool                  # 貸切試合かどうか
     allocated_duration_minutes: int        # 試合時間（通常: 10分 / 貸切: 8分）
     assigned_groups: list[EntryGroup]      # 参加グループ一覧
-    total_players: int = 6                 # 合計参加人数（常に6名）
+    total_players: int = 6                 # 合計参加人数（常に6名・スタッフ含む）
     teams: Optional[MatchTeams] = None     # 赤・青チームの編成内訳
+    is_staff_assisted: bool = False        # 運営スタッフ助っ人参加フラグ
     started_at: Optional[datetime] = None  # 開始時刻
     ended_at: Optional[datetime] = None    # 終了時刻
     created_at: datetime = field(default_factory=datetime.now)

@@ -81,7 +81,7 @@ class MatchingEngine:
         return group
 
     # =========================================================================
-    # 2. ★【アルゴリズム①】マッチング探索 (どのグループで6名を作るか？)
+    # 2. ★【アルゴリズム①】マッチング探索 (どのグループでマッチを作るか？)
     # =========================================================================
     def find_next_match(
         self,
@@ -90,45 +90,69 @@ class MatchingEngine:
     ) -> Optional[Match]:
         """待機中のグループから、次に試合を行う組み合わせを探索します。
 
-        【改造のヒント】:
-        現在は「FIFO（到着順）最優先」で、先頭のグループを必ず含めて合計6名になる
-        組み合わせを探しています。
-        待ち時間が長いグループの優先度を高めたり、人数に応じたマッチング順序を変えたい
-        場合は、このメソッドの探索ロジックを改造してください。
+        【探索優先順位】:
+        1. 先頭が貸切（Closed 6名）なら即座に貸切マッチ成立
+        2. 先頭Openグループを含めて「合計6名」（一般プレイヤーのみ）を作れるか探索
+        3. 先頭Openグループを含めて「合計5名」（3/2編成 ＋ 運営スタッフ1名助っ人）を作れるか探索
+        4. 先頭がマッチできない場合（詰まり防止）:
+           後続グループ同士で「合計6名」または「合計5名」が作れるなら、追い越しマッチを許可してフィールドを遊ばせない！
         """
         if not waiting_pool:
             return None
 
-        # 待機列の先頭グループ（最も長く待っているグループ）
+        # 待機列の先頭グループ
         first_group = waiting_pool[0]
 
         # --- パターンA: 先頭が貸切（Closed 6名）の場合 ---
         if first_group.preference == Preference.CLOSED:
             return self._create_match([first_group], is_closed=True, created_at=current_time)
 
-        # --- パターンB: 先頭が通常（Open）の場合 ---
-        # Open希望のグループのみを対象に組み合わせを探索
+        # --- パターンB: 通常（Open）の組み合わせ探索 ---
         open_groups = [g for g in waiting_pool if g.preference == Preference.OPEN]
         if not open_groups:
             return None
 
+        # 1. 先頭グループを含む組み合わせの探索
         target_group = open_groups[0]
-        needed_players = self.config.max_players_per_match - target_group.member_count
+        candidate_pool = open_groups[1:]
 
-        # 先頭グループ単独で6名の場合
-        if needed_players == 0:
+        # 1-a. 単独6名
+        if target_group.member_count == 6:
             return self._create_match([target_group], is_closed=False, created_at=current_time)
 
-        # 先頭グループ以外の候補から、残りの人数（needed_players）に一致する組み合わせを探す
-        candidate_pool = open_groups[1:]
-        exact_combo = self._find_exact_sum(candidate_pool, needed_players)
+        # 1-b. 先頭＋後続で合計6名（通常マッチ）
+        exact_six = self._find_exact_sum(candidate_pool, 6 - target_group.member_count)
+        if exact_six is not None:
+            return self._create_match([target_group] + exact_six, is_closed=False, created_at=current_time)
 
-        if exact_combo is not None:
-            # 先頭グループ ＋ ピッタリ人数になる後続グループたち で合計6名マッチ成立！
-            matched_groups = [target_group] + exact_combo
-            return self._create_match(matched_groups, is_closed=False, created_at=current_time)
+        # 1-c. 先頭＋後続で合計5名（3/2許可 ＋ 運営スタッフ1名助っ人参加）
+        if target_group.member_count <= 5:
+            needed_for_five = 5 - target_group.member_count
+            if needed_for_five == 0:
+                return self._create_match([target_group], is_closed=False, created_at=current_time)
+            exact_five = self._find_exact_sum(candidate_pool, needed_for_five)
+            if exact_five is not None:
+                return self._create_match([target_group] + exact_five, is_closed=False, created_at=current_time)
 
-        # 合計6名が集まらない場合はマッチ不成立（3 vs 3を厳守するため待機）
+        # 2. 先頭グループがマッチできない場合の「先頭詰まり防止（追い越しマッチング）」
+        # 後続グループ群 candidate_pool から 6名 または 5名 を探索
+        if len(candidate_pool) >= 2:
+            sub_target = candidate_pool[0]
+            sub_pool = candidate_pool[1:]
+            if sub_target.member_count == 6:
+                return self._create_match([sub_target], is_closed=False, created_at=current_time)
+            exact_six_sub = self._find_exact_sum(sub_pool, 6 - sub_target.member_count)
+            if exact_six_sub is not None:
+                return self._create_match([sub_target] + exact_six_sub, is_closed=False, created_at=current_time)
+
+            if sub_target.member_count <= 5:
+                needed_five_sub = 5 - sub_target.member_count
+                if needed_five_sub == 0:
+                    return self._create_match([sub_target], is_closed=False, created_at=current_time)
+                exact_five_sub = self._find_exact_sum(sub_pool, needed_five_sub)
+                if exact_five_sub is not None:
+                    return self._create_match([sub_target] + exact_five_sub, is_closed=False, created_at=current_time)
+
         return None
 
     def _find_exact_sum(
@@ -145,16 +169,13 @@ class MatchingEngine:
             if current_sum > target_sum or index >= len(candidates):
                 return False
 
-            # candidates[index] を採用する場合 (先に並んだ人を優先)
             result.append(candidates[index])
             if search(index + 1, current_sum + candidates[index].member_count):
                 return True
-            result.pop()  # バックトラック（戻す）
+            result.pop()
 
-            # candidates[index] を採用しない場合
             if search(index + 1, current_sum):
                 return True
-
             return False
 
         if search(0, 0):
@@ -162,21 +183,16 @@ class MatchingEngine:
         return None
 
     # =========================================================================
-    # 3. ★【アルゴリズム②】チーム編成 (6名を 赤3名 vs 青3名 にどう分けるか？)
+    # 3. ★【アルゴリズム②】チーム編成 (赤3名 vs 青3名 にどう分けるか？)
     # =========================================================================
     def assign_teams(self, groups: list[EntryGroup]) -> MatchTeams:
-        """選ばれたグループ（合計6名）を「Red 3名 vs Blue 3名」に配分します。
-
-        【方針】:
-        1. グループを分割せずに 3名 vs 3名 に分けられるなら、仲間同士を分断しない（最優先）
-           （例: [3名] vs [3名]、[3名] vs [2名+1名]、[2名+1名] vs [2名+1名] など）
-        2. 4名や5名グループがいて分割が必要な場合は、最も人数の多いグループを分割して
-           Redに3名、残りをBlueに回して「3 vs 3」を厳密に成立させる。
-
-        【改造のヒント】:
-        「友達同士で対戦したいからあえて2人ずつに割りたい」「ソロプレイヤーを均等に配分したい」
-        など、チーム分けのこだわりを反映したい場合はここを改造してください。
+        """選ばれたグループ（合計6名または5名）を「Red 3名 vs Blue 3名」に配分します。
+        合計5名の場合は、足りない1名を「運営スタッフ（シフトから参加）」として補充します。
+        どんな人数のグループ構成でも（[2, 2, 2] 等も含め）、厳密に各チーム3名を作成します。
         """
+        total_players = sum(g.member_count for g in groups)
+        is_staff_needed = (total_players == 5)
+
         # 単一グループで6名の場合（Closed または 6名Open）
         if len(groups) == 1 and groups[0].member_count == 6:
             g = groups[0]
@@ -187,8 +203,8 @@ class MatchingEngine:
                 team_blue_count=3,
             )
 
-        # ステップ1: グループを分割せずに ちょうど3名 のチームが作れるか試す
-        exact_three = self._find_exact_three_without_split(groups)
+        # ステップ1: グループを分割せずに Red（3名）が作れるか試す
+        exact_three = self._find_exact_sum(groups, 3)
         if exact_three is not None:
             red_ids = {g.id for g in exact_three}
             team_red = [TeamAllocation(group=g, player_count=g.member_count) for g in exact_three]
@@ -197,57 +213,46 @@ class MatchingEngine:
                 for g in groups
                 if g.id not in red_ids
             ]
+            if is_staff_needed:
+                team_blue.append(TeamAllocation(group=None, player_count=1, is_staff=True))
             return MatchTeams(team_red=team_red, team_blue=team_blue, team_red_count=3, team_blue_count=3)
 
-        # ステップ2: 分割が必要な場合（4名または5名グループが含まれる場合）
-        # 人数の多い順にソート（最も人数の大きいグループを分割対象にする）
+        # ステップ2: 分割が必要な場合（[2, 2, 2], [4, 2], [5, 1], [4, 1] など）
+        team_red: list[TeamAllocation] = []
+        team_blue: list[TeamAllocation] = []
+        red_rem = 3
+        blue_rem = 2 if is_staff_needed else 3
+
+        # 人数の大きい順にソート（仲間同士のまとまりを維持）
         sorted_groups = sorted(groups, key=lambda g: g.member_count, reverse=True)
-        large_group = sorted_groups[0]
-        other_groups = sorted_groups[1:]
 
-        # large_group から 3名 を赤チームへ
-        team_red = [TeamAllocation(group=large_group, player_count=3)]
+        for g in sorted_groups:
+            count = g.member_count
+            if red_rem >= count:
+                team_red.append(TeamAllocation(group=g, player_count=count))
+                red_rem -= count
+            elif red_rem > 0:
+                to_red = red_rem
+                to_blue = count - to_red
+                team_red.append(TeamAllocation(group=g, player_count=to_red))
+                red_rem = 0
+                if to_blue > 0:
+                    team_blue.append(TeamAllocation(group=g, player_count=to_blue))
+                    blue_rem -= to_blue
+            else:
+                team_blue.append(TeamAllocation(group=g, player_count=count))
+                blue_rem -= count
 
-        # large_group の残り人数を青チームへ
-        remaining_count = large_group.member_count - 3
-        team_blue = []
-        if remaining_count > 0:
-            team_blue.append(TeamAllocation(group=large_group, player_count=remaining_count))
-
-        # 残りのグループを青チームへ（合計でちょうど3名になる）
-        for g in other_groups:
-            team_blue.append(TeamAllocation(group=g, player_count=g.member_count))
+        if is_staff_needed:
+            team_blue.append(TeamAllocation(group=None, player_count=1, is_staff=True))
 
         return MatchTeams(team_red=team_red, team_blue=team_blue, team_red_count=3, team_blue_count=3)
-
-    def _find_exact_three_without_split(self, groups: list[EntryGroup]) -> Optional[list[EntryGroup]]:
-        """グループを分割せずに合計人数が3名になる部分集合を探す"""
-        result: list[EntryGroup] = []
-
-        def search(idx: int, current_sum: int) -> bool:
-            if current_sum == 3:
-                return True
-            if current_sum > 3 or idx >= len(groups):
-                return False
-
-            result.append(groups[idx])
-            if search(idx + 1, current_sum + groups[idx].member_count):
-                return True
-            result.pop()
-
-            if search(idx + 1, current_sum):
-                return True
-            return False
-
-        if search(0, 0):
-            return result
-        return None
 
     # =========================================================================
     # 4. ★【アルゴリズム③】サジェストTips (モニタへの案内表示)
     # =========================================================================
     def calculate_suggestion(self, waiting_groups: list[EntryGroup]) -> SuggestionTip:
-        """待機列の状況から、あと何名いれば3vs3（6名）が即座に成立するかを算出します。"""
+        """待機列の状況から、あと何名いれば即座に対戦成立するかを算出します。"""
         open_waiting = [g for g in waiting_groups if g.preference == Preference.OPEN]
 
         if not open_waiting:
@@ -257,18 +262,16 @@ class MatchingEngine:
             )
 
         total_players = sum(g.member_count for g in open_waiting)
-        remainder = total_players % 6
-        deficit = (6 - remainder) % 6
-
-        if deficit == 0:
+        if total_players >= 5:
             return SuggestionTip(
-                recommended_party_size=3,
-                message="現在6名が待機中！まもなく3vs3マッチが成立します。",
+                recommended_party_size=1,
+                message="まもなく対戦マッチングが成立します！",
             )
 
+        needed = 5 - total_players
         return SuggestionTip(
-            recommended_party_size=deficit,
-            message=f"現在【{deficit}名】組なら、すぐにご案内可能です！（3vs3即時成立）",
+            recommended_party_size=needed,
+            message=f"現在【{needed}名】組なら、すぐにご案内可能です！（3vs3即時成立・スタッフ助っ人あり）",
         )
 
     # =========================================================================
@@ -285,6 +288,8 @@ class MatchingEngine:
             if is_closed
             else self.config.standard_match_duration_minutes
         )
+        total_players = sum(g.member_count for g in groups)
+        is_staff_assisted = (total_players == 5)
         teams = self.assign_teams(groups)
 
         match = Match(
@@ -294,8 +299,9 @@ class MatchingEngine:
             is_closed_match=is_closed,
             allocated_duration_minutes=duration,
             assigned_groups=groups,
-            total_players=6,
+            total_players=6,  # スタッフ補充により常に6名対戦
             teams=teams,
+            is_staff_assisted=is_staff_assisted,
             created_at=created_at,
         )
         self._next_match_number += 1
