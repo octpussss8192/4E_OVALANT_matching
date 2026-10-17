@@ -24,3 +24,7 @@ Thumbs.db
 .claude/
 agent/
 skills-lock.json
+
+# Archive / Temp
+_archive/
+.pytest_cache/
