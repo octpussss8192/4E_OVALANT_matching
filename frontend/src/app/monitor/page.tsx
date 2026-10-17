@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Card, NotificationBanner } from '@/design-system';
 import { getQueueStatus } from '@/lib/api';
+import { subscribeToMatchUpdates } from '@/lib/supabase';
 import type { QueueStatusResponse, Match } from '@/types';
 
 export default function MonitorPage() {
@@ -19,8 +20,17 @@ export default function MonitorPage() {
     };
 
     poll();
-    const timer = setInterval(poll, 2500);
-    return () => clearInterval(timer);
+    // 定期ポーリング（フォールバック）
+    const timer = setInterval(poll, 3000);
+    // Supabase Realtime イベントによる即時反映
+    const unsubscribe = subscribeToMatchUpdates(() => {
+      poll();
+    });
+
+    return () => {
+      clearInterval(timer);
+      unsubscribe();
+    };
   }, []);
 
   const renderSlotCard = (match: Match | null, title: string) => {

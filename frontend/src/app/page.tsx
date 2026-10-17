@@ -17,6 +17,7 @@ import {
 import { useSessionId } from '@/hooks/useSessionId';
 import { useWakeLock } from '@/hooks/useWakeLock';
 import { createEntry, getEntryStatus, getQueueStatus } from '@/lib/api';
+import { subscribeToMatchUpdates } from '@/lib/supabase';
 import type { EntryResponse, QueueStatusResponse, PreferenceType } from '@/types';
 
 export default function ParticipantPage() {
@@ -74,7 +75,14 @@ export default function ParticipantPage() {
 
     poll();
     timer = setInterval(poll, 3000);
-    return () => clearInterval(timer);
+    const unsubscribe = subscribeToMatchUpdates(() => {
+      poll();
+    });
+
+    return () => {
+      clearInterval(timer);
+      unsubscribe();
+    };
   }, []);
 
   // エントリー送信
