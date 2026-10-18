@@ -125,19 +125,21 @@ export default function ParticipantPage() {
         </div>
       )}
 
-      {/* ヘッダー */}
-      <header className="bg-key-900 text-white py-4 px-6 shadow-md">
+      {/* ヘッダー (デジタル庁デザインシステム準拠) */}
+      <header className="bg-white border-b border-solid-gray-300 py-4 px-6">
         <div className="max-w-xl mx-auto flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-bold tracking-wider">OVALANT</h1>
-            <p className="text-xs text-solid-gray-300">3v3 赤外線シューティング マッチング</p>
+          <div className="flex items-center gap-3">
+            <span className="w-1.5 h-6 bg-key-900 rounded-full inline-block shrink-0" aria-hidden="true" />
+            <div>
+              <h1 className="text-lg font-bold tracking-tight text-solid-gray-900">OVALANT</h1>
+              <p className="text-xs text-solid-gray-600">3v3 赤外線シューティング マッチング</p>
+            </div>
           </div>
-          <a
-            href="/monitor"
-            className="text-xs bg-key-1000 hover:bg-key-1100 text-white px-3 py-1.5 rounded-6 border border-key-700"
-          >
-            会場モニタ表示
-          </a>
+          <Button asChild size="sm" variant="outline">
+            <a href="/monitor">
+              会場モニタ表示
+            </a>
+          </Button>
         </div>
       </header>
 
@@ -160,8 +162,8 @@ export default function ParticipantPage() {
           /* エントリー済: 待機または呼出中画面 */
           <div className="space-y-6">
             <Card
-              variant={isCalled ? 'success' : 'default'}
-              className={isCalled ? 'animate-pulse border-4' : ''}
+              variant={isCalled ? 'key' : 'default'}
+              className={isCalled ? 'border-2 border-key-900' : ''}
             >
               <div className="text-center py-4">
                 <div className="mb-2">
@@ -175,11 +177,11 @@ export default function ParticipantPage() {
 
                 <div className="mt-3 flex items-center justify-center">
                   {isCalled ? (
-                    <span className="inline-block bg-emerald-600 text-white font-bold px-4 py-1.5 rounded-full text-lg shadow-sm">
+                    <span className="inline-block bg-key-900 text-white font-bold px-4 py-2 rounded-8 text-base">
                       📢 呼出中 (受付へお越しください)
                     </span>
                   ) : (
-                    <StatusBadge className="bg-key-900 text-sm px-3 py-1">
+                    <StatusBadge className="bg-solid-gray-536 text-sm px-3 py-1">
                       {myEntryInfo.slot_name === 'next_next'
                         ? '次々回 試合枠 (準備待機)'
                         : myEntryInfo.slot_name === 'next'
@@ -190,7 +192,7 @@ export default function ParticipantPage() {
                 </div>
 
                 {isCalled && (
-                  <div className="mt-4 p-4 bg-emerald-100 rounded-8 border border-emerald-300 text-emerald-950 font-bold text-base leading-relaxed">
+                  <div className="mt-4 p-4 bg-key-50 rounded-8 border border-key-300 text-key-900 font-bold text-sm leading-relaxed">
                     🔔 お待たせしました！受付スタッフへこの画面をお見せください。
                   </div>
                 )}

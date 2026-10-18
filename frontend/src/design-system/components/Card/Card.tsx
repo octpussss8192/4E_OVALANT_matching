@@ -1,24 +1,22 @@
 import type { ComponentProps } from 'react';
 
 export type CardProps = ComponentProps<'div'> & {
-  variant?: 'default' | 'success' | 'warning' | 'error';
+  variant?: 'default' | 'key' | 'gray';
 };
 
 export const Card = (props: CardProps) => {
   const { className, variant = 'default', children, ...rest } = props;
 
-  let variantStyle = 'bg-white border-solid-gray-300';
-  if (variant === 'success') {
-    variantStyle = 'bg-emerald-50 border-emerald-500 ring-2 ring-emerald-500';
-  } else if (variant === 'warning') {
-    variantStyle = 'bg-amber-50 border-amber-400';
-  } else if (variant === 'error') {
-    variantStyle = 'bg-red-50 border-red-400';
+  let variantStyle = 'bg-white border-solid-gray-300 text-solid-gray-900';
+  if (variant === 'key') {
+    variantStyle = 'bg-white border-key-900 text-solid-gray-900';
+  } else if (variant === 'gray') {
+    variantStyle = 'bg-solid-gray-50 border-solid-gray-300 text-solid-gray-900';
   }
 
   return (
     <div
-      className={`rounded-12 border p-5 shadow-sm transition-all duration-200 ${variantStyle} ${className ?? ''}`}
+      className={`rounded-8 border p-5 bg-white ${variantStyle} ${className ?? ''}`}
       {...rest}
     >
       {children}
