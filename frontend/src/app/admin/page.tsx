@@ -64,13 +64,13 @@ export default function AdminPage() {
   // 全リセット確認モーダル用状態
   const resetDialogRef = useRef<HTMLDialogElement>(null);
 
-  // CSVエクスポート処理 (UTF-8 BOM付き)
-  const handleExportCsv = () => {
-    const list = queueState?.all_history_entries && queueState.all_history_entries.length > 0
-      ? queueState.all_history_entries
-      : (queueState?.all_active_entries ?? []);
+  // CSVエクスポート処理 (バックエンド直接ダウンロード + クライアント側フォールバック、Excel対応 UTF-8 BOM付き)
+  const handleExportCsv = async () => {
+    const totalEntries =
+      (queueState?.all_history_entries?.length ?? 0) ||
+      (queueState?.all_active_entries?.length ?? 0);
 
-    if (list.length === 0) {
+    if (!queueState || totalEntries === 0) {
       setActionFeedback({
         type: 'warning',
         title: 'エクスポート不可',
@@ -79,7 +79,55 @@ export default function AdminPage() {
       return;
     }
 
-    const headers = ['整理券番号', 'チーム名', '代表者名', '人数', '希望形式', '最終ステータス', '受付時刻', '割当試合ID', 'スキップ理由'];
+    try {
+      // 1. バックエンドの最新エクスポートAPIを試行
+      const apiBase =
+        typeof window !== 'undefined'
+          ? '/api'
+          : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api');
+      const res = await fetch(`${apiBase}/admin/export-csv`, { cache: 'no-store' });
+
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const now = new Date();
+        const timestamp = now.toISOString().replace(/[-:T]/g, '').slice(0, 14);
+        a.download = `ovalant_entries_${timestamp}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+        setActionFeedback({
+          type: 'success',
+          title: 'CSVエクスポート完了',
+          message: `全 ${totalEntries} 件のエントリー履歴をCSV出力しました。`,
+        });
+        return;
+      }
+    } catch (e) {
+      console.warn('Backend export failed, falling back to client-side export:', e);
+    }
+
+    // 2. バックエンドAPIが使えない場合のクライアント側Blobフォールバック
+    const list =
+      queueState.all_history_entries && queueState.all_history_entries.length > 0
+        ? queueState.all_history_entries
+        : (queueState.all_active_entries ?? []);
+
+    const headers = [
+      '整理券番号',
+      'チーム名',
+      '代表者名',
+      '人数',
+      '希望形式',
+      '最終ステータス',
+      '受付時刻',
+      '割当試合ID',
+      'スキップ理由',
+    ];
     const rows = list.map((g) => {
       let statusStr = '待機中';
       if (g.status === 'in_match') statusStr = '対戦中';
@@ -111,7 +159,7 @@ export default function AdminPage() {
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
 
     setActionFeedback({
       type: 'success',
@@ -585,7 +633,7 @@ export default function AdminPage() {
                       size="sm"
                       variant="outline"
                       onClick={handleExportCsv}
-                      disabled={displayGroups.length === 0}
+                      disabled={!queueState || (historyList.length === 0 && activeList.length === 0)}
                     >
                       📥 CSV出力
                     </Button>

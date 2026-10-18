@@ -158,3 +158,76 @@ def reset_system():
     engine.reset()
     return ActionSuccessResponse(success=True, message="システムをリセットしました")
 
+
+@router.get("/admin/export-csv")
+def export_csv():
+    """全エントリー履歴を Excel 対応 UTF-8 BOM付き CSV でダウンロード"""
+    from fastapi.responses import Response
+    from datetime import datetime
+    import io
+    import csv
+
+    engine.load_state()
+    entries = sorted(engine.entries, key=lambda x: x.entry_number)
+
+    output = io.StringIO()
+    # Excel 用 UTF-8 BOM
+    output.write("\ufeff")
+    writer = csv.writer(output)
+
+    # ヘッダー
+    writer.writerow([
+        "整理券番号",
+        "チーム名",
+        "代表者名",
+        "参加人数",
+        "希望形式",
+        "最終ステータス",
+        "受付時刻",
+        "割当試合ID",
+        "スキップ理由",
+    ])
+
+    for g in entries:
+        status_str = "待機中"
+        if g.status.value == "in_match":
+            status_str = "対戦中"
+        elif g.status.value == "called":
+            status_str = "呼出中"
+        elif g.status.value == "completed":
+            status_str = "対戦完了"
+        elif g.status.value == "skipped":
+            status_str = "不在スキップ"
+
+        pref_str = "貸切(8分)" if g.preference.value == "closed" else "合流(10分)"
+        if hasattr(g.created_at, "strftime"):
+            created_str = g.created_at.strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            created_str = str(g.created_at)
+
+        writer.writerow([
+            g.entry_number,
+            g.team_name,
+            g.leader_name,
+            g.headcount,
+            pref_str,
+            status_str,
+            created_str,
+            g.assigned_match_id or "",
+            g.skip_reason or "",
+        ])
+
+    csv_data = output.getvalue().encode("utf-8")
+    now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"ovalant_entries_{now_str}.csv"
+
+    return Response(
+        content=csv_data,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-cache",
+        },
+    )
+
+
