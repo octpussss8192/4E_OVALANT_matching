@@ -11,6 +11,7 @@ import json
 import os
 import tempfile
 import threading
+import uuid
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional
@@ -25,6 +26,7 @@ from .models import (
     TeamSideAssignment,
     TeamSideType,
 )
+from .supabase_client import SupabaseStorage
 
 
 def _get_storage_path() -> Path:
@@ -44,6 +46,7 @@ class MatchingEngine:
     def __init__(self, flexible_wait_seconds: int = 600, storage_path: Optional[Path] = None):
         self._lock = threading.RLock()
         self.storage_path = storage_path or _get_storage_path()
+        self.supabase = SupabaseStorage()
         self.entries: list[EntryGroup] = []
         self.matches: list[Match] = []
         self.next_entry_number: int = 101
@@ -52,8 +55,13 @@ class MatchingEngine:
         self.load_state()
 
     def save_state(self) -> None:
-        """ディスクに内部状態を保存して永続化（プロセス再起動・リロード対策）"""
+        """ディスクおよび Supabase に内部状態を保存して永続化（Vercel全コンテナ共有）"""
         with self._lock:
+            # 1. Supabase 同期 (Vercel Serverless Function 間の完全共有)
+            if self.supabase.is_configured():
+                self.supabase.save_state(self.entries, self.matches)
+
+            # 2. ローカルディスク保存 (フォールバック)
             try:
                 data = {
                     "next_entry_number": self.next_entry_number,
@@ -80,8 +88,19 @@ class MatchingEngine:
                 print(f"[MatchingEngine] Failed to save state to {self.storage_path}: {e}")
 
     def load_state(self) -> None:
-        """ディスクから内部状態を復元"""
+        """Supabase またはディスクから内部状態を復元"""
         with self._lock:
+            # 1. Supabase から優先復元 (Vercel Serverless Function 間の完全共有)
+            if self.supabase.is_configured():
+                state = self.supabase.load_state()
+                if state:
+                    self.entries = state["entries"]
+                    self.matches = state["matches"]
+                    self.next_entry_number = state["next_entry_number"]
+                    self.next_match_number = state["next_match_number"]
+                    return
+
+            # 2. ローカルディスクフォールバック
             if not self.storage_path.exists():
                 return
             try:
@@ -101,6 +120,8 @@ class MatchingEngine:
             self.matches.clear()
             self.next_entry_number = 101
             self.next_match_number = 1
+            if self.supabase.is_configured():
+                self.supabase.reset_all()
             self.save_state()
 
     # --------------------------------------------------------------------------
@@ -122,7 +143,7 @@ class MatchingEngine:
             actual_preference = PreferenceType.CLOSED if headcount >= 4 else preference
 
             entry = EntryGroup(
-                id=f"entry-{int(now.timestamp() * 1000)}-{len(self.entries) + 1}",
+                id=str(uuid.uuid4()),
                 entry_number=self.next_entry_number,
                 session_id=session_id,
                 leader_name=leader_name,
@@ -155,7 +176,7 @@ class MatchingEngine:
                 created = now + timedelta(seconds=idx)
                 actual_pref = PreferenceType.CLOSED if hc >= 4 else pref
                 entry = EntryGroup(
-                    id=f"entry-{int(created.timestamp() * 1000)}-{len(self.entries) + 1}",
+                    id=str(uuid.uuid4()),
                     entry_number=self.next_entry_number,
                     session_id=f"test-{int(now.timestamp())}-{idx + 1}",
                     leader_name=l_name,
@@ -443,7 +464,7 @@ class MatchingEngine:
         return None
 
     def _create_closed_match(self, group: EntryGroup, current_time: datetime) -> Match:
-        match_id = f"match-{self.next_match_number}"
+        match_id = str(uuid.uuid4())
         self.next_match_number += 1
 
         # Closed は仲間内対戦（8分枠）
@@ -466,7 +487,7 @@ class MatchingEngine:
     def _create_open_match(
         self, red_groups: list[EntryGroup], blue_groups: list[EntryGroup], current_time: datetime
     ) -> Match:
-        match_id = f"match-{self.next_match_number}"
+        match_id = str(uuid.uuid4())
         self.next_match_number += 1
 
         red_count = sum(g.headcount for g in red_groups)
