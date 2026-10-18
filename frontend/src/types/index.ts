@@ -81,6 +81,7 @@ export interface QueueStatusResponse {
   total_waiting_groups: number;
   total_waiting_players: number;
   waiting_groups: EntryGroup[];
+  all_entries?: EntryGroup[];
 }
 
 export interface CreateEntryRequest {

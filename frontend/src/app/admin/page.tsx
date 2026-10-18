@@ -150,6 +150,15 @@ export default function AdminPage() {
     }
   };
 
+  const [activeTab, setActiveTab] = useState<'waiting' | 'skipped' | 'all'>('waiting');
+
+  const allEntries = queueState?.all_entries || [];
+  const waitingEntries = allEntries.filter((e) => e.status === 'waiting');
+  const skippedEntries = allEntries.filter((e) => e.status === 'skipped');
+  const calledCount = allEntries.filter((e) => e.status === 'called').length;
+  const inMatchCount = allEntries.filter((e) => e.status === 'in_match').length;
+  const completedCount = allEntries.filter((e) => e.status === 'completed').length;
+
   const renderSlotManagement = (
     match: Match | null,
     slotTitle: string,
@@ -157,7 +166,15 @@ export default function AdminPage() {
     actionColorClass: string
   ) => {
     return (
-      <Card className="flex flex-col justify-between bg-white shadow-sm border border-solid-gray-300">
+      <Card className={`relative flex flex-col justify-between bg-white shadow-sm border border-solid-gray-300 transition-all duration-200 ${actionLoading ? 'opacity-80' : ''}`}>
+        {actionLoading && (
+          <div className="absolute inset-0 bg-white/60 backdrop-blur-[1px] flex items-center justify-center z-10 rounded-12">
+            <div className="flex items-center gap-2 bg-solid-gray-900 text-white text-xs px-3 py-1.5 rounded-full shadow-lg">
+              <span className="animate-spin inline-block">🔄</span>
+              <span>同期処理中...</span>
+            </div>
+          </div>
+        )}
         <div>
           <div className="flex items-center justify-between border-b pb-2 mb-3">
             <span className="font-bold text-sm text-solid-gray-800">{slotTitle}</span>
@@ -279,6 +296,34 @@ export default function AdminPage() {
         </div>
       </header>
 
+      {/* デバッグ・状態可視化メトリクスバー */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2 mb-4">
+        <div className="bg-white border border-solid-gray-300 rounded-8 p-2.5 text-center shadow-xs">
+          <div className="text-[10px] text-solid-gray-500 font-semibold">登録総数</div>
+          <div className="text-base font-black text-solid-gray-900">{allEntries.length} <span className="text-xs font-normal">組</span></div>
+        </div>
+        <div className="bg-blue-50 border border-blue-200 rounded-8 p-2.5 text-center shadow-xs">
+          <div className="text-[10px] text-blue-700 font-semibold">待機キュー (Waiting)</div>
+          <div className="text-base font-black text-blue-900">{waitingEntries.length} <span className="text-xs font-normal">組</span></div>
+        </div>
+        <div className="bg-amber-50 border border-amber-200 rounded-8 p-2.5 text-center shadow-xs">
+          <div className="text-[10px] text-amber-700 font-semibold">呼出・準備 (Called)</div>
+          <div className="text-base font-black text-amber-900">{calledCount} <span className="text-xs font-normal">組</span></div>
+        </div>
+        <div className="bg-emerald-50 border border-emerald-200 rounded-8 p-2.5 text-center shadow-xs">
+          <div className="text-[10px] text-emerald-700 font-semibold">対戦中 (In Match)</div>
+          <div className="text-base font-black text-emerald-900">{inMatchCount} <span className="text-xs font-normal">組</span></div>
+        </div>
+        <div className="bg-solid-gray-100 border border-solid-gray-300 rounded-8 p-2.5 text-center shadow-xs">
+          <div className="text-[10px] text-solid-gray-600 font-semibold">対戦終了 (Completed)</div>
+          <div className="text-base font-black text-solid-gray-700">{completedCount} <span className="text-xs font-normal">組</span></div>
+        </div>
+        <div className="bg-red-50 border border-red-200 rounded-8 p-2.5 text-center shadow-xs">
+          <div className="text-[10px] text-red-700 font-semibold">スキップ済 (Skipped)</div>
+          <div className="text-base font-black text-red-900">{skippedEntries.length} <span className="text-xs font-normal">組</span></div>
+        </div>
+      </div>
+
       {/* アクション実行中の通知バー */}
       {actionLoading && (
         <div className="mb-4 bg-blue-50 border border-blue-200 text-blue-900 px-4 py-2.5 rounded-8 flex items-center justify-between text-xs font-bold shadow-sm animate-pulse">
@@ -312,70 +357,201 @@ export default function AdminPage() {
         )}
       </div>
 
-      {/* 下段: 待機キュー一覧テーブル */}
+      {/* 下段: キュー・ログ一覧テーブル（タブ切替対応） */}
       <Card className="flex-1 bg-white shadow-sm border border-solid-gray-300">
-        <div className="flex items-center justify-between border-b pb-3 mb-4">
-          <Heading size="20" hasChip={true} className="font-bold text-solid-gray-900">
-            待機キュー一覧 ({queueState?.total_waiting_groups ?? 0}組 / {queueState?.total_waiting_players ?? 0}名)
-          </Heading>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b pb-3 mb-4 gap-2">
+          {/* タブ切り替えボタン */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setActiveTab('waiting')}
+              className={`px-3 py-1.5 rounded-6 text-xs font-bold transition-colors ${
+                activeTab === 'waiting'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-solid-gray-100 text-solid-gray-700 hover:bg-solid-gray-200'
+              }`}
+            >
+              ⏳ 待機キュー ({waitingEntries.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('skipped')}
+              className={`px-3 py-1.5 rounded-6 text-xs font-bold transition-colors ${
+                activeTab === 'skipped'
+                  ? 'bg-red-600 text-white'
+                  : 'bg-solid-gray-100 text-solid-gray-700 hover:bg-solid-gray-200'
+              }`}
+            >
+              ⏭️ スキップ済 ({skippedEntries.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('all')}
+              className={`px-3 py-1.5 rounded-6 text-xs font-bold transition-colors ${
+                activeTab === 'all'
+                  ? 'bg-solid-gray-800 text-white'
+                  : 'bg-solid-gray-100 text-solid-gray-700 hover:bg-solid-gray-200'
+              }`}
+            >
+              📋 全履歴 ({allEntries.length})
+            </button>
+          </div>
+
           <span className="text-xs text-solid-gray-500">
             💡 サジェスト: {queueState?.suggestion_tip.message}
           </span>
         </div>
 
-        {queueState && queueState.waiting_groups.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="border-b bg-solid-gray-100 text-solid-gray-700">
-                  <th className="py-2.5 px-3 font-semibold">整理券</th>
-                  <th className="py-2.5 px-3 font-semibold">チーム名</th>
-                  <th className="py-2.5 px-3 font-semibold">代表者名</th>
-                  <th className="py-2.5 px-3 font-semibold">人数</th>
-                  <th className="py-2.5 px-3 font-semibold">希望</th>
-                  <th className="py-2.5 px-3 font-semibold">受付時刻</th>
-                  <th className="py-2.5 px-3 font-semibold text-right">操作</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-solid-gray-200">
-                {queueState.waiting_groups.map((group, idx) => (
-                  <tr key={group.id} className="hover:bg-solid-gray-50">
-                    <td className="py-2.5 px-3 font-bold text-key-900">#{group.entry_number}</td>
-                    <td className="py-2.5 px-3 font-bold text-solid-gray-900">{group.team_name}</td>
-                    <td className="py-2.5 px-3 text-solid-gray-600">{group.leader_name}</td>
-                    <td className="py-2.5 px-3 font-bold">{group.headcount}名</td>
-                    <td className="py-2.5 px-3">
-                      <span
-                        className={`px-2 py-0.5 rounded-4 text-[10px] font-bold ${
-                          group.preference === 'closed'
-                            ? 'bg-amber-100 text-amber-800'
-                            : 'bg-blue-100 text-blue-800'
-                        }`}
-                      >
-                        {group.preference === 'closed' ? '貸切(8分)' : '合流(10分)'}
-                      </span>
-                    </td>
-                    <td className="py-2.5 px-3 text-solid-gray-500">
-                      {new Date(group.created_at).toLocaleTimeString('ja-JP')}
-                    </td>
-                    <td className="py-2.5 px-3 text-right">
-                      <Button
-                        size="xs"
-                        variant="outline"
-                        className="border-red-600 text-red-600 hover:bg-red-50"
-                        onClick={() => openSkipModal(group)}
-                        disabled={actionLoading}
-                      >
-                        不在スキップ
-                      </Button>
-                    </td>
+        {/* タブ別テーブル表示 */}
+        {activeTab === 'waiting' && (
+          waitingEntries.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b bg-solid-gray-100 text-solid-gray-700">
+                    <th className="py-2.5 px-3 font-semibold">整理券</th>
+                    <th className="py-2.5 px-3 font-semibold">チーム名</th>
+                    <th className="py-2.5 px-3 font-semibold">代表者名</th>
+                    <th className="py-2.5 px-3 font-semibold">人数</th>
+                    <th className="py-2.5 px-3 font-semibold">希望</th>
+                    <th className="py-2.5 px-3 font-semibold">受付時刻</th>
+                    <th className="py-2.5 px-3 font-semibold text-right">操作</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="py-12 text-center text-xs text-solid-gray-400">現在、待機中のグループはありません。</div>
+                </thead>
+                <tbody className="divide-y divide-solid-gray-200">
+                  {waitingEntries.map((group) => (
+                    <tr key={group.id} className="hover:bg-solid-gray-50">
+                      <td className="py-2.5 px-3 font-bold text-key-900">#{group.entry_number}</td>
+                      <td className="py-2.5 px-3 font-bold text-solid-gray-900">{group.team_name}</td>
+                      <td className="py-2.5 px-3 text-solid-gray-600">{group.leader_name}</td>
+                      <td className="py-2.5 px-3 font-bold">{group.headcount}名</td>
+                      <td className="py-2.5 px-3">
+                        <span
+                          className={`px-2 py-0.5 rounded-4 text-[10px] font-bold ${
+                            group.preference === 'closed'
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-blue-100 text-blue-800'
+                          }`}
+                        >
+                          {group.preference === 'closed' ? '貸切(8分)' : '合流(10分)'}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 text-solid-gray-500">
+                        {new Date(group.created_at).toLocaleTimeString('ja-JP')}
+                      </td>
+                      <td className="py-2.5 px-3 text-right">
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          className="border-red-600 text-red-600 hover:bg-red-50"
+                          onClick={() => openSkipModal(group)}
+                          disabled={actionLoading}
+                        >
+                          不在スキップ
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="py-12 text-center text-xs text-solid-gray-400">現在、待機中のグループはありません。</div>
+          )
+        )}
+
+        {activeTab === 'skipped' && (
+          skippedEntries.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b bg-red-50 text-red-900">
+                    <th className="py-2.5 px-3 font-semibold">整理券</th>
+                    <th className="py-2.5 px-3 font-semibold">チーム名</th>
+                    <th className="py-2.5 px-3 font-semibold">代表者名</th>
+                    <th className="py-2.5 px-3 font-semibold">人数</th>
+                    <th className="py-2.5 px-3 font-semibold">スキップ理由</th>
+                    <th className="py-2.5 px-3 font-semibold">スキップ時刻</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-solid-gray-200">
+                  {skippedEntries.map((group) => (
+                    <tr key={group.id} className="hover:bg-red-50/30">
+                      <td className="py-2.5 px-3 font-bold text-red-900">#{group.entry_number}</td>
+                      <td className="py-2.5 px-3 font-bold text-solid-gray-900 line-through">{group.team_name}</td>
+                      <td className="py-2.5 px-3 text-solid-gray-600">{group.leader_name}</td>
+                      <td className="py-2.5 px-3 font-bold">{group.headcount}名</td>
+                      <td className="py-2.5 px-3 text-red-700">{group.skip_reason || '不在のためスキップ'}</td>
+                      <td className="py-2.5 px-3 text-solid-gray-500">
+                        {new Date(group.updated_at).toLocaleTimeString('ja-JP')}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="py-12 text-center text-xs text-solid-gray-400">スキップされたグループはありません。</div>
+          )
+        )}
+
+        {activeTab === 'all' && (
+          allEntries.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b bg-solid-gray-100 text-solid-gray-700">
+                    <th className="py-2.5 px-3 font-semibold">整理券</th>
+                    <th className="py-2.5 px-3 font-semibold">チーム名</th>
+                    <th className="py-2.5 px-3 font-semibold">代表者名</th>
+                    <th className="py-2.5 px-3 font-semibold">人数</th>
+                    <th className="py-2.5 px-3 font-semibold">ステータス</th>
+                    <th className="py-2.5 px-3 font-semibold">受付時刻</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-solid-gray-200">
+                  {allEntries.map((group) => (
+                    <tr key={group.id} className="hover:bg-solid-gray-50">
+                      <td className="py-2.5 px-3 font-bold text-key-900">#{group.entry_number}</td>
+                      <td className="py-2.5 px-3 font-bold text-solid-gray-900">{group.team_name}</td>
+                      <td className="py-2.5 px-3 text-solid-gray-600">{group.leader_name}</td>
+                      <td className="py-2.5 px-3 font-bold">{group.headcount}名</td>
+                      <td className="py-2.5 px-3">
+                        <span
+                          className={`px-2 py-0.5 rounded-4 text-[10px] font-bold ${
+                            group.status === 'waiting'
+                              ? 'bg-blue-100 text-blue-800'
+                              : group.status === 'called'
+                              ? 'bg-amber-100 text-amber-800'
+                              : group.status === 'in_match'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : group.status === 'completed'
+                              ? 'bg-solid-gray-200 text-solid-gray-800'
+                              : 'bg-red-100 text-red-800'
+                          }`}
+                        >
+                          {group.status === 'waiting'
+                            ? '待機中'
+                            : group.status === 'called'
+                            ? '呼出中'
+                            : group.status === 'in_match'
+                            ? '対戦中'
+                            : group.status === 'completed'
+                            ? '完了'
+                            : 'スキップ'}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 text-solid-gray-500">
+                        {new Date(group.created_at).toLocaleTimeString('ja-JP')}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="py-12 text-center text-xs text-solid-gray-400">エントリー履歴はありません。</div>
+          )
         )}
       </Card>
 

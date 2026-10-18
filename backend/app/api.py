@@ -75,6 +75,7 @@ def get_queue_status():
 
     total_waiting_players = sum(e.headcount for e in waiting_groups)
     tip = engine.calculate_suggestion_tip()
+    all_entries = sorted(engine.entries, key=lambda x: x.created_at, reverse=True)
 
     return QueueStatusResponse(
         current_match=current_match,
@@ -84,6 +85,7 @@ def get_queue_status():
         total_waiting_groups=len(waiting_groups),
         total_waiting_players=total_waiting_players,
         waiting_groups=waiting_groups,
+        all_entries=all_entries,
     )
 
 
