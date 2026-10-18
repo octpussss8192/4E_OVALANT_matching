@@ -43,9 +43,15 @@ def _get_storage_path() -> Path:
 
 
 class MatchingEngine:
-    def __init__(self, flexible_wait_seconds: int = 600, storage_path: Optional[Path] = None):
+    def __init__(
+        self,
+        flexible_wait_seconds: int = 600,
+        storage_path: Optional[Path] = None,
+        disable_supabase: bool = False,
+    ):
         self._lock = threading.RLock()
         self.storage_path = storage_path or _get_storage_path()
+        self.disable_supabase = disable_supabase
         self.supabase = SupabaseStorage()
         self.entries: list[EntryGroup] = []
         self.matches: list[Match] = []
@@ -58,7 +64,7 @@ class MatchingEngine:
         """ディスクおよび Supabase に内部状態を保存して永続化（Vercel全コンテナ共有）"""
         with self._lock:
             # 1. Supabase 同期 (Vercel Serverless Function 間の完全共有)
-            if self.supabase.is_configured():
+            if not self.disable_supabase and self.supabase.is_configured():
                 self.supabase.save_state(self.entries, self.matches)
 
             # 2. ローカルディスク保存 (フォールバック)
@@ -91,7 +97,7 @@ class MatchingEngine:
         """Supabase またはディスクから内部状態を復元"""
         with self._lock:
             # 1. Supabase から優先復元 (Vercel Serverless Function 間の完全共有)
-            if self.supabase.is_configured():
+            if not self.disable_supabase and self.supabase.is_configured():
                 state = self.supabase.load_state()
                 if state:
                     self.entries = state["entries"]
@@ -120,7 +126,7 @@ class MatchingEngine:
             self.matches.clear()
             self.next_entry_number = 101
             self.next_match_number = 1
-            if self.supabase.is_configured():
+            if not self.disable_supabase and self.supabase.is_configured():
                 self.supabase.reset_all()
             self.save_state()
 
@@ -225,15 +231,42 @@ class MatchingEngine:
             if target.assigned_match_id:
                 match = next((m for m in self.matches if m.id == target.assigned_match_id), None)
                 if match and match.status != MatchStatus.FINISHED:
-                    match.status = MatchStatus.CANCELLED
                     if match.is_closed_match:
-                        # Closedマッチは枠ごと破棄
-                        pass
+                        # Closed (貸切枠) は代表グループが不在なら枠ごと破棄
+                        match.status = MatchStatus.CANCELLED
                     else:
-                        # Openマッチは解体し、残された相方グループは元のcreated_atを維持して待機キュー最優先に戻す
-                        for partner in match.assigned_groups:
-                            if partner.id != target.id:
-                                # self.entries 側の実体を確実に WAITING & match_id=None に戻す
+                        # Openマッチ: 不在グループを除外
+                        remaining_assigned = [g for g in match.assigned_groups if g.id != target.id]
+
+                        # チーム分けから除外
+                        remaining_red = [g for g in (match.teams.red.groups if match.teams else []) if g.id != target.id]
+                        remaining_blue = [g for g in (match.teams.blue.groups if match.teams else []) if g.id != target.id]
+
+                        red_count = sum(g.headcount for g in remaining_red)
+                        blue_count = sum(g.headcount for g in remaining_blue)
+
+                        # 残ったメンバーで試合が成立できるか判定:
+                        # (3v3, 3v2, 2v3, 2v2) のいずれかを満たせば、スロットを維持したまま試合続行！
+                        is_valid_match = (
+                            (red_count == 3 and blue_count == 3)
+                            or (red_count == 3 and blue_count == 2)
+                            or (red_count == 2 and blue_count == 3)
+                            or (red_count == 2 and blue_count == 2)
+                        )
+
+                        if is_valid_match:
+                            # 試合スロットを維持したままチーム構成を即時更新（相方は後ろに回されない！）
+                            match.assigned_groups = remaining_assigned
+                            match.total_players = red_count + blue_count
+                            match.teams = MatchTeams(
+                                red=TeamSideAssignment(team_side=TeamSideType.RED, groups=remaining_red, total_count=red_count),
+                                blue=TeamSideAssignment(team_side=TeamSideType.BLUE, groups=remaining_blue, total_count=blue_count),
+                            )
+                        else:
+                            # 人数バランスが崩れて試合が成立しない場合のみマッチをキャンセルし、
+                            # 残されたグループを待機キュー最優先（元のcreated_at保持）に戻す
+                            match.status = MatchStatus.CANCELLED
+                            for partner in remaining_assigned:
                                 ent = self._get_entry(partner.id)
                                 if ent:
                                     ent.status = EntryStatus.WAITING
