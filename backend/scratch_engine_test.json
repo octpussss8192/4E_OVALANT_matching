@@ -1,0 +1,119 @@
+{
+  "next_entry_number": 103,
+  "next_match_number": 2,
+  "entries": [
+    {
+      "id": "2eea8507-314f-4073-8791-21f8125e8963",
+      "entry_number": 101,
+      "session_id": "sa",
+      "leader_name": "ペアA",
+      "team_name": "ペアA組",
+      "headcount": 2,
+      "preference": "open",
+      "status": "called",
+      "assigned_match_id": "363edaab-56dc-4738-b535-28455d2233df",
+      "skip_reason": null,
+      "created_at": "2026-10-18T14:53:22.442663",
+      "updated_at": "2026-10-18T14:53:24.731596"
+    },
+    {
+      "id": "6ae9efba-1004-41c3-a099-8517c1f17494",
+      "entry_number": 102,
+      "session_id": "sb",
+      "leader_name": "ペアB",
+      "team_name": "ペアB組",
+      "headcount": 2,
+      "preference": "open",
+      "status": "called",
+      "assigned_match_id": "363edaab-56dc-4738-b535-28455d2233df",
+      "skip_reason": null,
+      "created_at": "2026-10-18T14:53:24.731596",
+      "updated_at": "2026-10-18T14:53:24.731596"
+    }
+  ],
+  "matches": [
+    {
+      "id": "363edaab-56dc-4738-b535-28455d2233df",
+      "match_number": 1,
+      "status": "calling",
+      "is_closed_match": false,
+      "duration_minutes": 10,
+      "assigned_groups": [
+        {
+          "id": "2eea8507-314f-4073-8791-21f8125e8963",
+          "entry_number": 101,
+          "session_id": "sa",
+          "leader_name": "ペアA",
+          "team_name": "ペアA組",
+          "headcount": 2,
+          "preference": "open",
+          "status": "called",
+          "assigned_match_id": "363edaab-56dc-4738-b535-28455d2233df",
+          "skip_reason": null,
+          "created_at": "2026-10-18T14:53:22.442663",
+          "updated_at": "2026-10-18T14:53:24.731596"
+        },
+        {
+          "id": "6ae9efba-1004-41c3-a099-8517c1f17494",
+          "entry_number": 102,
+          "session_id": "sb",
+          "leader_name": "ペアB",
+          "team_name": "ペアB組",
+          "headcount": 2,
+          "preference": "open",
+          "status": "called",
+          "assigned_match_id": "363edaab-56dc-4738-b535-28455d2233df",
+          "skip_reason": null,
+          "created_at": "2026-10-18T14:53:24.731596",
+          "updated_at": "2026-10-18T14:53:24.731596"
+        }
+      ],
+      "total_players": 4,
+      "teams": {
+        "red": {
+          "team_side": "red",
+          "groups": [
+            {
+              "id": "2eea8507-314f-4073-8791-21f8125e8963",
+              "entry_number": 101,
+              "session_id": "sa",
+              "leader_name": "ペアA",
+              "team_name": "ペアA組",
+              "headcount": 2,
+              "preference": "open",
+              "status": "called",
+              "assigned_match_id": "363edaab-56dc-4738-b535-28455d2233df",
+              "skip_reason": null,
+              "created_at": "2026-10-18T14:53:22.442663",
+              "updated_at": "2026-10-18T14:53:24.731596"
+            }
+          ],
+          "total_count": 2
+        },
+        "blue": {
+          "team_side": "blue",
+          "groups": [
+            {
+              "id": "6ae9efba-1004-41c3-a099-8517c1f17494",
+              "entry_number": 102,
+              "session_id": "sb",
+              "leader_name": "ペアB",
+              "team_name": "ペアB組",
+              "headcount": 2,
+              "preference": "open",
+              "status": "called",
+              "assigned_match_id": "363edaab-56dc-4738-b535-28455d2233df",
+              "skip_reason": null,
+              "created_at": "2026-10-18T14:53:24.731596",
+              "updated_at": "2026-10-18T14:53:24.731596"
+            }
+          ],
+          "total_count": 2
+        }
+      },
+      "started_at": null,
+      "ended_at": null,
+      "created_at": "2026-10-18T14:53:24.731596"
+    }
+  ]
+}
