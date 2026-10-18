@@ -20,36 +20,48 @@ import type { QueueStatusResponse, Match, EntryGroup } from '@/types';
 export default function AdminPage() {
   const [queueState, setQueueState] = useState<QueueStatusResponse | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
+  const [actionLoadingText, setActionLoadingText] = useState<string | null>(null);
+  const [isFetching, setIsFetching] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<string>('');
 
   // スキップ確認モーダル用状態
   const [skipTarget, setSkipTarget] = useState<EntryGroup | null>(null);
   const skipDialogRef = useRef<HTMLDialogElement>(null);
 
-  const fetchStatus = async () => {
+  const fetchStatus = async (showIndicator = false) => {
+    if (showIndicator) setIsFetching(true);
     try {
       const data = await getQueueStatus();
       setQueueState(data);
+      const now = new Date();
+      setLastUpdated(now.toLocaleTimeString('ja-JP'));
     } catch (err) {
       console.error('Failed to fetch admin status:', err);
+    } finally {
+      if (showIndicator) setIsFetching(false);
     }
   };
 
   useEffect(() => {
-    fetchStatus();
-    const timer = setInterval(fetchStatus, 2000);
+    fetchStatus(true);
+    const timer = setInterval(() => {
+      fetchStatus(false);
+    }, 2000);
     return () => clearInterval(timer);
   }, []);
 
   // 試合進行操作 (Advance)
   const handleAdvance = async (matchId: string) => {
     setActionLoading(true);
+    setActionLoadingText('試合進行・繰り上げ処理中...');
     try {
       await advanceMatch(matchId);
-      await fetchStatus();
+      await fetchStatus(true);
     } catch (err: any) {
       alert(err.message || '試合進行に失敗しました');
     } finally {
       setActionLoading(false);
+      setActionLoadingText(null);
     }
   };
 
@@ -69,20 +81,23 @@ export default function AdminPage() {
   const handleConfirmSkip = async () => {
     if (!skipTarget) return;
     setActionLoading(true);
+    setActionLoadingText(`不在スキップ処理中 (#${skipTarget.entry_number} ${skipTarget.team_name})...`);
     try {
       await skipEntry(skipTarget.id, '受付呼出時不在のため運営がスキップ');
       closeSkipModal();
-      await fetchStatus();
+      await fetchStatus(true);
     } catch (err: any) {
       alert(err.message || 'スキップに失敗しました');
     } finally {
       setActionLoading(false);
+      setActionLoadingText(null);
     }
   };
 
   // デバッグ用: サンプルグループの自動投入
   const handleAddSampleGroups = async () => {
     setActionLoading(true);
+    setActionLoadingText('テストデータ4組を一括投入中...');
     try {
       await createEntry({
         session_id: `test-${Date.now()}-1`,
@@ -112,11 +127,12 @@ export default function AdminPage() {
         headcount: 4,
         preference: 'closed',
       });
-      await fetchStatus();
+      await fetchStatus(true);
     } catch (err: any) {
       alert(err.message || 'テストデータの投入に失敗しました');
     } finally {
       setActionLoading(false);
+      setActionLoadingText(null);
     }
   };
 
@@ -124,11 +140,13 @@ export default function AdminPage() {
   const handleReset = async () => {
     if (!confirm('本当にすべての試合と待機エントリーをリセットしますか？')) return;
     setActionLoading(true);
+    setActionLoadingText('全データをリセット中...');
     try {
       await resetSystem();
-      await fetchStatus();
+      await fetchStatus(true);
     } finally {
       setActionLoading(false);
+      setActionLoadingText(null);
     }
   };
 
@@ -178,7 +196,9 @@ export default function AdminPage() {
               </div>
             </div>
           ) : (
-            <div className="py-8 text-center text-xs text-solid-gray-400">枠は現在空いています</div>
+            <div className="py-8 text-center text-xs text-solid-gray-400">
+              {actionLoading ? '更新中...' : '枠は現在空いています'}
+            </div>
           )}
         </div>
 
@@ -191,7 +211,7 @@ export default function AdminPage() {
               onClick={() => handleAdvance(match.id)}
               disabled={actionLoading}
             >
-              {actionButtonText}
+              {actionLoading ? '処理中...' : actionButtonText}
             </Button>
           </div>
         )}
@@ -202,16 +222,39 @@ export default function AdminPage() {
   return (
     <main className="min-h-screen bg-solid-gray-100 p-6 flex flex-col">
       {/* スタッフ管理ヘッダー */}
-      <header className="flex items-center justify-between bg-solid-gray-900 text-white px-6 py-4 rounded-12 shadow mb-6">
+      <header className="flex flex-col md:flex-row md:items-center justify-between bg-solid-gray-900 text-white px-6 py-4 rounded-12 shadow mb-4 gap-4">
         <div>
-          <h1 className="text-xl font-bold tracking-wider">OVALANT 運営ダッシュボード (iPad)</h1>
-          <p className="text-xs text-solid-gray-400">受付呼出・試合進行・不在スキップ管理</p>
+          <div className="flex items-center gap-3">
+            <h1 className="text-xl font-bold tracking-wider">OVALANT 運営ダッシュボード (iPad)</h1>
+            {/* リアルタイム同期インジケーター */}
+            <div className="flex items-center gap-1.5 bg-solid-gray-800 border border-solid-gray-700 px-2.5 py-1 rounded-full text-[11px]">
+              <span className={`inline-block size-2 rounded-full ${isFetching ? 'bg-amber-400 animate-ping' : 'bg-emerald-400'}`} />
+              <span className="text-solid-gray-300">
+                {isFetching ? '同期中...' : 'リアルタイム同期 (2s)'}
+              </span>
+              {lastUpdated && (
+                <span className="text-solid-gray-400 ml-1">({lastUpdated})</span>
+              )}
+            </div>
+          </div>
+          <p className="text-xs text-solid-gray-400 mt-0.5">受付呼出・試合進行・不在スキップ管理</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* 手動リフレッシュボタン */}
           <Button
             size="sm"
             variant="outline"
-            className="text-xs bg-white"
+            className="text-xs bg-solid-gray-800 text-white border-solid-gray-600 hover:bg-solid-gray-700"
+            onClick={() => fetchStatus(true)}
+            disabled={actionLoading || isFetching}
+          >
+            <span className={isFetching ? 'animate-spin inline-block mr-1' : 'inline-block mr-1'}>🔄</span>
+            手動更新
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="text-xs bg-white text-solid-gray-900"
             onClick={handleAddSampleGroups}
             disabled={actionLoading}
           >
@@ -229,12 +272,23 @@ export default function AdminPage() {
           <a
             href="/monitor"
             target="_blank"
-            className="text-xs bg-key-700 hover:bg-key-800 text-white font-bold px-3 py-2 rounded-6"
+            className="text-xs bg-key-700 hover:bg-key-800 text-white font-bold px-3 py-2 rounded-6 inline-flex items-center"
           >
-            会場モニタ別窓
+            会場モニタ別窓 ↗
           </a>
         </div>
       </header>
+
+      {/* アクション実行中の通知バー */}
+      {actionLoading && (
+        <div className="mb-4 bg-blue-50 border border-blue-200 text-blue-900 px-4 py-2.5 rounded-8 flex items-center justify-between text-xs font-bold shadow-sm animate-pulse">
+          <div className="flex items-center gap-2">
+            <span className="animate-spin inline-block text-base">⏳</span>
+            <span>{actionLoadingText || 'サーバーと同期中... しばらくお待ちください'}</span>
+          </div>
+          <span className="text-[11px] text-blue-700 font-normal">自動的に画面へ反映されます</span>
+        </div>
+      )}
 
       {/* 上段: 3スロット進行パネル */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
