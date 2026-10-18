@@ -6,6 +6,7 @@ import {
   Heading,
   Button,
   StatusBadge,
+  NotificationBanner,
   ModalDialog,
   ModalDialogContent,
   ModalDialogHeader,
@@ -17,28 +18,60 @@ import {
 import { getQueueStatus, advanceMatch, skipEntry, resetSystem, createEntry } from '@/lib/api';
 import type { QueueStatusResponse, Match, EntryGroup } from '@/types';
 
+// デジタル庁デザインシステム規格のスピナーアイコン (SVG)
+const Spinner = ({ className = 'size-4 text-current' }: { className?: string }) => (
+  <svg
+    className={`animate-spin ${className}`}
+    xmlns="http://www.w3.org/2000/svg"
+    fill="none"
+    viewBox="0 0 24 24"
+    aria-hidden="true"
+  >
+    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+    <path
+      className="opacity-75"
+      fill="currentColor"
+      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+    />
+  </svg>
+);
+
 export default function AdminPage() {
   const [queueState, setQueueState] = useState<QueueStatusResponse | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [actionLoadingText, setActionLoadingText] = useState<string | null>(null);
+  const [actionFeedback, setActionFeedback] = useState<{ title: string; message: string; type: 'info1' | 'success' | 'warning' } | null>(null);
   const [isFetching, setIsFetching] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string>('');
+
+  // 競合状態（Race Condition）防止用リクエストID
+  const fetchRequestIdRef = useRef(0);
+  const actionLoadingRef = useRef(false);
 
   // スキップ確認モーダル用状態
   const [skipTarget, setSkipTarget] = useState<EntryGroup | null>(null);
   const skipDialogRef = useRef<HTMLDialogElement>(null);
 
   const fetchStatus = async (showIndicator = false) => {
+    // 操作中は古いポーリングによる競合上書きを防ぐためスキップ
+    if (!showIndicator && actionLoadingRef.current) return;
+
+    const reqId = ++fetchRequestIdRef.current;
     if (showIndicator) setIsFetching(true);
     try {
       const data = await getQueueStatus();
-      setQueueState(data);
-      const now = new Date();
-      setLastUpdated(now.toLocaleTimeString('ja-JP'));
+      // 最新のリクエストレスポンスのみを反映（古いレスポンスによる上書き巻き戻しを完全防止）
+      if (reqId === fetchRequestIdRef.current) {
+        setQueueState(data);
+        const now = new Date();
+        setLastUpdated(now.toLocaleTimeString('ja-JP'));
+      }
     } catch (err) {
       console.error('Failed to fetch admin status:', err);
     } finally {
-      if (showIndicator) setIsFetching(false);
+      if (showIndicator && reqId === fetchRequestIdRef.current) {
+        setIsFetching(false);
+      }
     }
   };
 
@@ -50,16 +83,31 @@ export default function AdminPage() {
     return () => clearInterval(timer);
   }, []);
 
+  // 自動消去タイマー (フィードバックバナー)
+  useEffect(() => {
+    if (actionFeedback) {
+      const timer = setTimeout(() => setActionFeedback(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [actionFeedback]);
+
   // 試合進行操作 (Advance)
   const handleAdvance = async (matchId: string) => {
+    actionLoadingRef.current = true;
     setActionLoading(true);
     setActionLoadingText('試合進行・繰り上げ処理中...');
     try {
       await advanceMatch(matchId);
+      setActionFeedback({
+        type: 'success',
+        title: '試合スロット進行完了',
+        message: '試合ステータスを進行し、空いたスロットへ後続待機組を繰り上げました。',
+      });
       await fetchStatus(true);
     } catch (err: any) {
       alert(err.message || '試合進行に失敗しました');
     } finally {
+      actionLoadingRef.current = false;
       setActionLoading(false);
       setActionLoadingText(null);
     }
@@ -80,15 +128,22 @@ export default function AdminPage() {
   // スキップ実行
   const handleConfirmSkip = async () => {
     if (!skipTarget) return;
+    actionLoadingRef.current = true;
     setActionLoading(true);
     setActionLoadingText(`不在スキップ処理中 (#${skipTarget.entry_number} ${skipTarget.team_name})...`);
     try {
       await skipEntry(skipTarget.id, '受付呼出時不在のため運営がスキップ');
       closeSkipModal();
+      setActionFeedback({
+        type: 'info1',
+        title: '不在スキップを実行しました',
+        message: `#${skipTarget.entry_number}「${skipTarget.team_name}」をスキップしました。相方グループは待機キュー最優先に戻りました。`,
+      });
       await fetchStatus(true);
     } catch (err: any) {
       alert(err.message || 'スキップに失敗しました');
     } finally {
+      actionLoadingRef.current = false;
       setActionLoading(false);
       setActionLoadingText(null);
     }
@@ -96,6 +151,7 @@ export default function AdminPage() {
 
   // デバッグ用: サンプルグループの自動投入
   const handleAddSampleGroups = async () => {
+    actionLoadingRef.current = true;
     setActionLoading(true);
     setActionLoadingText('テストデータ4組を一括投入中...');
     try {
@@ -127,10 +183,16 @@ export default function AdminPage() {
         headcount: 4,
         preference: 'closed',
       });
+      setActionFeedback({
+        type: 'info1',
+        title: 'テストデータ投入完了',
+        message: '4組（Alpha 3名, Bravo 2名, Charlie 1名, Delta 4名）を投入し、スロットを再編成しました。',
+      });
       await fetchStatus(true);
     } catch (err: any) {
       alert(err.message || 'テストデータの投入に失敗しました');
     } finally {
+      actionLoadingRef.current = false;
       setActionLoading(false);
       setActionLoadingText(null);
     }
@@ -139,25 +201,23 @@ export default function AdminPage() {
   // 全リセット
   const handleReset = async () => {
     if (!confirm('本当にすべての試合と待機エントリーをリセットしますか？')) return;
+    actionLoadingRef.current = true;
     setActionLoading(true);
     setActionLoadingText('全データをリセット中...');
     try {
       await resetSystem();
+      setActionFeedback({
+        type: 'warning',
+        title: 'システム初期化',
+        message: 'すべての試合スロットおよび待機キューを空にリセットしました。',
+      });
       await fetchStatus(true);
     } finally {
+      actionLoadingRef.current = false;
       setActionLoading(false);
       setActionLoadingText(null);
     }
   };
-
-  const [activeTab, setActiveTab] = useState<'waiting' | 'skipped' | 'all'>('waiting');
-
-  const allEntries = queueState?.all_entries || [];
-  const waitingEntries = allEntries.filter((e) => e.status === 'waiting');
-  const skippedEntries = allEntries.filter((e) => e.status === 'skipped');
-  const calledCount = allEntries.filter((e) => e.status === 'called').length;
-  const inMatchCount = allEntries.filter((e) => e.status === 'in_match').length;
-  const completedCount = allEntries.filter((e) => e.status === 'completed').length;
 
   const renderSlotManagement = (
     match: Match | null,
@@ -166,17 +226,17 @@ export default function AdminPage() {
     actionColorClass: string
   ) => {
     return (
-      <Card className={`relative flex flex-col justify-between bg-white shadow-sm border border-solid-gray-300 transition-all duration-200 ${actionLoading ? 'opacity-80' : ''}`}>
+      <Card className="relative flex flex-col justify-between bg-white shadow-sm border border-solid-gray-300 min-h-[220px]">
+        {/* 操作中オーバーレイ */}
         {actionLoading && (
-          <div className="absolute inset-0 bg-white/60 backdrop-blur-[1px] flex items-center justify-center z-10 rounded-12">
-            <div className="flex items-center gap-2 bg-solid-gray-900 text-white text-xs px-3 py-1.5 rounded-full shadow-lg">
-              <span className="animate-spin inline-block">🔄</span>
-              <span>同期処理中...</span>
-            </div>
+          <div className="absolute inset-0 bg-white/75 backdrop-blur-[0.5px] rounded-12 flex flex-col items-center justify-center z-10 gap-2 text-xs font-bold text-solid-gray-800 transition-opacity">
+            <Spinner className="size-6 text-key-900" />
+            <span>{actionLoadingText || '更新中...'}</span>
           </div>
         )}
+
         <div>
-          <div className="flex items-center justify-between border-b pb-2 mb-3">
+          <div className="flex items-center justify-between border-b border-solid-gray-200 pb-2 mb-3">
             <span className="font-bold text-sm text-solid-gray-800">{slotTitle}</span>
             {match && (
               <span className="text-xs bg-key-50 text-key-900 border border-key-300 px-2 py-0.5 rounded-4 font-bold">
@@ -191,7 +251,7 @@ export default function AdminPage() {
                 {match.assigned_groups.map((group) => (
                   <div
                     key={group.id}
-                    className="flex items-center justify-between p-2.5 bg-solid-gray-50 rounded-6 border text-xs"
+                    className="flex items-center justify-between p-2.5 bg-solid-gray-50 rounded-6 border border-solid-gray-200 text-xs"
                   >
                     <div>
                       <span className="font-bold text-sm text-key-900 mr-2">#{group.entry_number}</span>
@@ -213,14 +273,20 @@ export default function AdminPage() {
               </div>
             </div>
           ) : (
-            <div className="py-8 text-center text-xs text-solid-gray-400">
-              {actionLoading ? '更新中...' : '枠は現在空いています'}
+            <div className="py-10 text-center text-xs text-solid-gray-400">
+              {actionLoading ? (
+                <div className="flex items-center justify-center gap-2 text-solid-gray-600 font-semibold">
+                  <Spinner className="size-4" /> スロット更新中...
+                </div>
+              ) : (
+                '枠は現在空いています'
+              )}
             </div>
           )}
         </div>
 
         {match && (
-          <div className="pt-4 mt-3 border-t">
+          <div className="pt-4 mt-3 border-t border-solid-gray-200">
             <Button
               size="md"
               variant="solid-fill"
@@ -228,7 +294,13 @@ export default function AdminPage() {
               onClick={() => handleAdvance(match.id)}
               disabled={actionLoading}
             >
-              {actionLoading ? '処理中...' : actionButtonText}
+              {actionLoading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <Spinner className="size-4" /> 処理中...
+                </span>
+              ) : (
+                actionButtonText
+              )}
             </Button>
           </div>
         )}
@@ -296,34 +368,6 @@ export default function AdminPage() {
         </div>
       </header>
 
-      {/* デバッグ・状態可視化メトリクスバー */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2 mb-4">
-        <div className="bg-white border border-solid-gray-300 rounded-8 p-2.5 text-center shadow-xs">
-          <div className="text-[10px] text-solid-gray-500 font-semibold">登録総数</div>
-          <div className="text-base font-black text-solid-gray-900">{allEntries.length} <span className="text-xs font-normal">組</span></div>
-        </div>
-        <div className="bg-blue-50 border border-blue-200 rounded-8 p-2.5 text-center shadow-xs">
-          <div className="text-[10px] text-blue-700 font-semibold">待機キュー (Waiting)</div>
-          <div className="text-base font-black text-blue-900">{waitingEntries.length} <span className="text-xs font-normal">組</span></div>
-        </div>
-        <div className="bg-amber-50 border border-amber-200 rounded-8 p-2.5 text-center shadow-xs">
-          <div className="text-[10px] text-amber-700 font-semibold">呼出・準備 (Called)</div>
-          <div className="text-base font-black text-amber-900">{calledCount} <span className="text-xs font-normal">組</span></div>
-        </div>
-        <div className="bg-emerald-50 border border-emerald-200 rounded-8 p-2.5 text-center shadow-xs">
-          <div className="text-[10px] text-emerald-700 font-semibold">対戦中 (In Match)</div>
-          <div className="text-base font-black text-emerald-900">{inMatchCount} <span className="text-xs font-normal">組</span></div>
-        </div>
-        <div className="bg-solid-gray-100 border border-solid-gray-300 rounded-8 p-2.5 text-center shadow-xs">
-          <div className="text-[10px] text-solid-gray-600 font-semibold">対戦終了 (Completed)</div>
-          <div className="text-base font-black text-solid-gray-700">{completedCount} <span className="text-xs font-normal">組</span></div>
-        </div>
-        <div className="bg-red-50 border border-red-200 rounded-8 p-2.5 text-center shadow-xs">
-          <div className="text-[10px] text-red-700 font-semibold">スキップ済 (Skipped)</div>
-          <div className="text-base font-black text-red-900">{skippedEntries.length} <span className="text-xs font-normal">組</span></div>
-        </div>
-      </div>
-
       {/* アクション実行中の通知バー */}
       {actionLoading && (
         <div className="mb-4 bg-blue-50 border border-blue-200 text-blue-900 px-4 py-2.5 rounded-8 flex items-center justify-between text-xs font-bold shadow-sm animate-pulse">
@@ -332,6 +376,19 @@ export default function AdminPage() {
             <span>{actionLoadingText || 'サーバーと同期中... しばらくお待ちください'}</span>
           </div>
           <span className="text-[11px] text-blue-700 font-normal">自動的に画面へ反映されます</span>
+        </div>
+      )}
+
+      {/* 操作完了フィードバック通知（デジタル庁公式 NotificationBanner） */}
+      {actionFeedback && (
+        <div className="mb-4">
+          <NotificationBanner
+            bannerStyle="standard"
+            type={actionFeedback.type}
+            title={actionFeedback.title}
+          >
+            <span className="text-sm font-medium">{actionFeedback.message}</span>
+          </NotificationBanner>
         </div>
       )}
 
@@ -357,201 +414,75 @@ export default function AdminPage() {
         )}
       </div>
 
-      {/* 下段: キュー・ログ一覧テーブル（タブ切替対応） */}
+      {/* 下段: 待機キュー一覧テーブル */}
       <Card className="flex-1 bg-white shadow-sm border border-solid-gray-300">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b pb-3 mb-4 gap-2">
-          {/* タブ切り替えボタン */}
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setActiveTab('waiting')}
-              className={`px-3 py-1.5 rounded-6 text-xs font-bold transition-colors ${
-                activeTab === 'waiting'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-solid-gray-100 text-solid-gray-700 hover:bg-solid-gray-200'
-              }`}
-            >
-              ⏳ 待機キュー ({waitingEntries.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('skipped')}
-              className={`px-3 py-1.5 rounded-6 text-xs font-bold transition-colors ${
-                activeTab === 'skipped'
-                  ? 'bg-red-600 text-white'
-                  : 'bg-solid-gray-100 text-solid-gray-700 hover:bg-solid-gray-200'
-              }`}
-            >
-              ⏭️ スキップ済 ({skippedEntries.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('all')}
-              className={`px-3 py-1.5 rounded-6 text-xs font-bold transition-colors ${
-                activeTab === 'all'
-                  ? 'bg-solid-gray-800 text-white'
-                  : 'bg-solid-gray-100 text-solid-gray-700 hover:bg-solid-gray-200'
-              }`}
-            >
-              📋 全履歴 ({allEntries.length})
-            </button>
-          </div>
-
+        <div className="flex items-center justify-between border-b border-solid-gray-200 pb-3 mb-4">
+          <Heading size="20" hasChip={true} className="font-bold text-solid-gray-900">
+            待機キュー一覧 ({queueState?.total_waiting_groups ?? 0}組 / {queueState?.total_waiting_players ?? 0}名)
+          </Heading>
           <span className="text-xs text-solid-gray-500">
             💡 サジェスト: {queueState?.suggestion_tip.message}
           </span>
         </div>
 
-        {/* タブ別テーブル表示 */}
-        {activeTab === 'waiting' && (
-          waitingEntries.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse text-xs">
-                <thead>
-                  <tr className="border-b bg-solid-gray-100 text-solid-gray-700">
-                    <th className="py-2.5 px-3 font-semibold">整理券</th>
-                    <th className="py-2.5 px-3 font-semibold">チーム名</th>
-                    <th className="py-2.5 px-3 font-semibold">代表者名</th>
-                    <th className="py-2.5 px-3 font-semibold">人数</th>
-                    <th className="py-2.5 px-3 font-semibold">希望</th>
-                    <th className="py-2.5 px-3 font-semibold">受付時刻</th>
-                    <th className="py-2.5 px-3 font-semibold text-right">操作</th>
+        {!queueState ? (
+          <div className="py-12 flex flex-col items-center justify-center gap-2 text-xs text-solid-gray-500">
+            <Spinner className="size-5 text-key-900" />
+            <span>待機キューの状況を取得中...</span>
+          </div>
+        ) : queueState.waiting_groups.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="border-b bg-solid-gray-100 text-solid-gray-700">
+                  <th className="py-2.5 px-3 font-semibold">整理券</th>
+                  <th className="py-2.5 px-3 font-semibold">チーム名</th>
+                  <th className="py-2.5 px-3 font-semibold">代表者名</th>
+                  <th className="py-2.5 px-3 font-semibold">人数</th>
+                  <th className="py-2.5 px-3 font-semibold">希望</th>
+                  <th className="py-2.5 px-3 font-semibold">受付時刻</th>
+                  <th className="py-2.5 px-3 font-semibold text-right">操作</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-solid-gray-200">
+                {queueState.waiting_groups.map((group) => (
+                  <tr key={group.id} className="hover:bg-solid-gray-50 transition-colors">
+                    <td className="py-2.5 px-3 font-bold text-key-900">#{group.entry_number}</td>
+                    <td className="py-2.5 px-3 font-bold text-solid-gray-900">{group.team_name}</td>
+                    <td className="py-2.5 px-3 text-solid-gray-600">{group.leader_name}</td>
+                    <td className="py-2.5 px-3 font-bold">{group.headcount}名</td>
+                    <td className="py-2.5 px-3">
+                      <span
+                        className={`px-2 py-0.5 rounded-4 text-[10px] font-bold ${
+                          group.preference === 'closed'
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'bg-blue-100 text-blue-800'
+                        }`}
+                      >
+                        {group.preference === 'closed' ? '貸切(8分)' : '合流(10分)'}
+                      </span>
+                    </td>
+                    <td className="py-2.5 px-3 text-solid-gray-500">
+                      {new Date(group.created_at).toLocaleTimeString('ja-JP')}
+                    </td>
+                    <td className="py-2.5 px-3 text-right">
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        className="border-red-600 text-red-600 hover:bg-red-50"
+                        onClick={() => openSkipModal(group)}
+                        disabled={actionLoading}
+                      >
+                        不在スキップ
+                      </Button>
+                    </td>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-solid-gray-200">
-                  {waitingEntries.map((group) => (
-                    <tr key={group.id} className="hover:bg-solid-gray-50">
-                      <td className="py-2.5 px-3 font-bold text-key-900">#{group.entry_number}</td>
-                      <td className="py-2.5 px-3 font-bold text-solid-gray-900">{group.team_name}</td>
-                      <td className="py-2.5 px-3 text-solid-gray-600">{group.leader_name}</td>
-                      <td className="py-2.5 px-3 font-bold">{group.headcount}名</td>
-                      <td className="py-2.5 px-3">
-                        <span
-                          className={`px-2 py-0.5 rounded-4 text-[10px] font-bold ${
-                            group.preference === 'closed'
-                              ? 'bg-amber-100 text-amber-800'
-                              : 'bg-blue-100 text-blue-800'
-                          }`}
-                        >
-                          {group.preference === 'closed' ? '貸切(8分)' : '合流(10分)'}
-                        </span>
-                      </td>
-                      <td className="py-2.5 px-3 text-solid-gray-500">
-                        {new Date(group.created_at).toLocaleTimeString('ja-JP')}
-                      </td>
-                      <td className="py-2.5 px-3 text-right">
-                        <Button
-                          size="xs"
-                          variant="outline"
-                          className="border-red-600 text-red-600 hover:bg-red-50"
-                          onClick={() => openSkipModal(group)}
-                          disabled={actionLoading}
-                        >
-                          不在スキップ
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="py-12 text-center text-xs text-solid-gray-400">現在、待機中のグループはありません。</div>
-          )
-        )}
-
-        {activeTab === 'skipped' && (
-          skippedEntries.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse text-xs">
-                <thead>
-                  <tr className="border-b bg-red-50 text-red-900">
-                    <th className="py-2.5 px-3 font-semibold">整理券</th>
-                    <th className="py-2.5 px-3 font-semibold">チーム名</th>
-                    <th className="py-2.5 px-3 font-semibold">代表者名</th>
-                    <th className="py-2.5 px-3 font-semibold">人数</th>
-                    <th className="py-2.5 px-3 font-semibold">スキップ理由</th>
-                    <th className="py-2.5 px-3 font-semibold">スキップ時刻</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-solid-gray-200">
-                  {skippedEntries.map((group) => (
-                    <tr key={group.id} className="hover:bg-red-50/30">
-                      <td className="py-2.5 px-3 font-bold text-red-900">#{group.entry_number}</td>
-                      <td className="py-2.5 px-3 font-bold text-solid-gray-900 line-through">{group.team_name}</td>
-                      <td className="py-2.5 px-3 text-solid-gray-600">{group.leader_name}</td>
-                      <td className="py-2.5 px-3 font-bold">{group.headcount}名</td>
-                      <td className="py-2.5 px-3 text-red-700">{group.skip_reason || '不在のためスキップ'}</td>
-                      <td className="py-2.5 px-3 text-solid-gray-500">
-                        {new Date(group.updated_at).toLocaleTimeString('ja-JP')}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="py-12 text-center text-xs text-solid-gray-400">スキップされたグループはありません。</div>
-          )
-        )}
-
-        {activeTab === 'all' && (
-          allEntries.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse text-xs">
-                <thead>
-                  <tr className="border-b bg-solid-gray-100 text-solid-gray-700">
-                    <th className="py-2.5 px-3 font-semibold">整理券</th>
-                    <th className="py-2.5 px-3 font-semibold">チーム名</th>
-                    <th className="py-2.5 px-3 font-semibold">代表者名</th>
-                    <th className="py-2.5 px-3 font-semibold">人数</th>
-                    <th className="py-2.5 px-3 font-semibold">ステータス</th>
-                    <th className="py-2.5 px-3 font-semibold">受付時刻</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-solid-gray-200">
-                  {allEntries.map((group) => (
-                    <tr key={group.id} className="hover:bg-solid-gray-50">
-                      <td className="py-2.5 px-3 font-bold text-key-900">#{group.entry_number}</td>
-                      <td className="py-2.5 px-3 font-bold text-solid-gray-900">{group.team_name}</td>
-                      <td className="py-2.5 px-3 text-solid-gray-600">{group.leader_name}</td>
-                      <td className="py-2.5 px-3 font-bold">{group.headcount}名</td>
-                      <td className="py-2.5 px-3">
-                        <span
-                          className={`px-2 py-0.5 rounded-4 text-[10px] font-bold ${
-                            group.status === 'waiting'
-                              ? 'bg-blue-100 text-blue-800'
-                              : group.status === 'called'
-                              ? 'bg-amber-100 text-amber-800'
-                              : group.status === 'in_match'
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : group.status === 'completed'
-                              ? 'bg-solid-gray-200 text-solid-gray-800'
-                              : 'bg-red-100 text-red-800'
-                          }`}
-                        >
-                          {group.status === 'waiting'
-                            ? '待機中'
-                            : group.status === 'called'
-                            ? '呼出中'
-                            : group.status === 'in_match'
-                            ? '対戦中'
-                            : group.status === 'completed'
-                            ? '完了'
-                            : 'スキップ'}
-                        </span>
-                      </td>
-                      <td className="py-2.5 px-3 text-solid-gray-500">
-                        {new Date(group.created_at).toLocaleTimeString('ja-JP')}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="py-12 text-center text-xs text-solid-gray-400">エントリー履歴はありません。</div>
-          )
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="py-12 text-center text-xs text-solid-gray-400">現在、待機中のグループはありません。</div>
         )}
       </Card>
 
@@ -581,17 +512,23 @@ export default function AdminPage() {
             </div>
           </ModalDialogBody>
           <ModalDialogActions className="flex justify-end gap-2">
-            <Button size="sm" variant="outline" onClick={closeSkipModal}>
+            <Button size="sm" variant="outline" onClick={closeSkipModal} disabled={actionLoading}>
               キャンセル
             </Button>
             <Button
               size="sm"
               variant="solid-fill"
-              className="bg-red-600 hover:bg-red-700 text-white"
+              className="bg-red-600 hover:bg-red-700 text-white min-w-32"
               onClick={handleConfirmSkip}
               disabled={actionLoading}
             >
-              スキップを実行する
+              {actionLoading ? (
+                <span className="flex items-center justify-center gap-1.5">
+                  <Spinner className="size-3.5" /> スキップ処理中...
+                </span>
+              ) : (
+                'スキップを実行する'
+              )}
             </Button>
           </ModalDialogActions>
         </ModalDialogContent>

@@ -38,12 +38,8 @@ export async function createEntry(req: CreateEntryRequest): Promise<EntryRespons
 
 export async function getQueueStatus(): Promise<QueueStatusResponse> {
   const apiBase = getApiBase();
-  const res = await fetch(`${apiBase}/status?_t=${Date.now()}`, {
+  const res = await fetch(`${apiBase}/status`, {
     cache: 'no-store',
-    headers: {
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
-      'Pragma': 'no-cache',
-    },
   });
   if (!res.ok) {
     throw new Error('ステータスの取得に失敗しました');
@@ -53,12 +49,8 @@ export async function getQueueStatus(): Promise<QueueStatusResponse> {
 
 export async function getEntryStatus(entryId: string): Promise<EntryResponse> {
   const apiBase = getApiBase();
-  const res = await fetch(`${apiBase}/entries/${entryId}?_t=${Date.now()}`, {
+  const res = await fetch(`${apiBase}/entries/${entryId}`, {
     cache: 'no-store',
-    headers: {
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
-      'Pragma': 'no-cache',
-    },
   });
   if (!res.ok) {
     throw new Error('エントリーステータスの取得に失敗しました');
