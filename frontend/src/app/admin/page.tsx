@@ -14,6 +14,7 @@ import {
   ModalDialogClose,
   ModalDialogBody,
   ModalDialogActions,
+  type StatusBadgeVariant,
 } from '@/design-system';
 import { getQueueStatus, advanceMatch, skipEntry, resetSystem, addSampleGroups } from '@/lib/api';
 import { subscribeToMatchUpdates } from '@/lib/supabase';
@@ -41,7 +42,11 @@ export default function AdminPage() {
   const [queueState, setQueueState] = useState<QueueStatusResponse | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [actionLoadingText, setActionLoadingText] = useState<string | null>(null);
-  const [actionFeedback, setActionFeedback] = useState<{ title: string; message: string; type: 'info1' | 'success' | 'warning' } | null>(null);
+  const [actionFeedback, setActionFeedback] = useState<{
+    title: string;
+    message: string;
+    type: 'info1' | 'success' | 'warning' | 'error';
+  } | null>(null);
   const [isFetching, setIsFetching] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string>('');
 
@@ -50,9 +55,12 @@ export default function AdminPage() {
   const actionLoadingRef = useRef(false);
   const isFetchingRef = useRef(false);
 
-  // スキップ確認モーダル用状態
+  // 不在スキップ確認モーダル用状態
   const [skipTarget, setSkipTarget] = useState<EntryGroup | null>(null);
   const skipDialogRef = useRef<HTMLDialogElement>(null);
+
+  // 全リセット確認モーダル用状態
+  const resetDialogRef = useRef<HTMLDialogElement>(null);
 
   const fetchStatus = async (showIndicator = false) => {
     // 操作中は古いポーリングによる競合上書きを防ぐためスキップ
@@ -128,10 +136,10 @@ export default function AdminPage() {
     };
   }, []);
 
-  // 自動消去タイマー (フィードバックバナー)
+  // 自動消去タイマー (フィードバックバナー: 6秒)
   useEffect(() => {
     if (actionFeedback) {
-      const timer = setTimeout(() => setActionFeedback(null), 5000);
+      const timer = setTimeout(() => setActionFeedback(null), 6000);
       return () => clearTimeout(timer);
     }
   }, [actionFeedback]);
@@ -150,7 +158,11 @@ export default function AdminPage() {
       });
       await fetchStatus(true);
     } catch (err: any) {
-      alert(err.message || '試合進行に失敗しました');
+      setActionFeedback({
+        type: 'error',
+        title: '進行エラー',
+        message: err.message || '試合進行に失敗しました',
+      });
     } finally {
       actionLoadingRef.current = false;
       setActionLoading(false);
@@ -186,7 +198,11 @@ export default function AdminPage() {
       });
       await fetchStatus(true);
     } catch (err: any) {
-      alert(err.message || 'スキップに失敗しました');
+      setActionFeedback({
+        type: 'error',
+        title: 'スキップエラー',
+        message: err.message || 'スキップに失敗しました',
+      });
     } finally {
       actionLoadingRef.current = false;
       setActionLoading(false);
@@ -210,7 +226,11 @@ export default function AdminPage() {
         message: '4組（Alpha 3名, Bravo 2名, Charlie 1名, Delta 4名）を一括投入し、スロットを再編成しました。',
       });
     } catch (err: any) {
-      alert(err.message || 'テストデータの投入に失敗しました');
+      setActionFeedback({
+        type: 'error',
+        title: '投入エラー',
+        message: err.message || 'テストデータの投入に失敗しました',
+      });
     } finally {
       actionLoadingRef.current = false;
       setActionLoading(false);
@@ -218,9 +238,18 @@ export default function AdminPage() {
     }
   };
 
-  // 全リセット
-  const handleReset = async () => {
-    if (!confirm('本当にすべての試合と待機エントリーをリセットしますか？')) return;
+  // 全リセット確認モーダルを開く
+  const openResetModal = () => {
+    resetDialogRef.current?.showModal();
+  };
+
+  const closeResetModal = () => {
+    resetDialogRef.current?.close();
+  };
+
+  // 全リセット実行
+  const handleConfirmReset = async () => {
+    closeResetModal();
     actionLoadingRef.current = true;
     setActionLoading(true);
     setActionLoadingText('全データをリセット中...');
@@ -232,6 +261,12 @@ export default function AdminPage() {
         message: 'すべての試合スロットおよび待機キューを空にリセットしました。',
       });
       await fetchStatus(true);
+    } catch (err: any) {
+      setActionFeedback({
+        type: 'error',
+        title: '初期化エラー',
+        message: err.message || '全リセットに失敗しました',
+      });
     } finally {
       actionLoadingRef.current = false;
       setActionLoading(false);
@@ -245,7 +280,7 @@ export default function AdminPage() {
     actionButtonText: string,
   ) => {
     return (
-      <Card className="relative flex flex-col justify-between bg-white border border-solid-gray-300 rounded-8 min-h-[220px]">
+      <Card className="relative flex flex-col justify-between min-h-[220px]">
         {/* 操作中オーバーレイ */}
         {actionLoading && (
           <div className="absolute inset-0 bg-white/80 backdrop-blur-[0.5px] rounded-8 flex flex-col items-center justify-center z-10 gap-2 text-xs font-bold text-solid-gray-900">
@@ -257,13 +292,15 @@ export default function AdminPage() {
         <div>
           <div className="flex items-center justify-between border-b border-solid-gray-200 pb-3 mb-3">
             <div className="flex items-center gap-2">
-              <span className="font-bold text-base text-solid-gray-900">{slotTitle}</span>
+              <Heading size="18" hasChip={true} className="font-bold text-solid-gray-900">
+                {slotTitle}
+              </Heading>
               {isFetching && <Spinner className="size-3.5 text-key-900" />}
             </div>
             {match && (
-              <span className="text-xs bg-solid-gray-100 text-solid-gray-800 border border-solid-gray-300 px-2 py-0.5 rounded-4 font-semibold">
+              <StatusBadge variant={match.is_closed_match ? 'gray' : 'key'} size="sm">
                 Match #{match.match_number} ({match.is_closed_match ? '貸切 8分' : '合流 10分'})
-              </span>
+              </StatusBadge>
             )}
           </div>
 
@@ -336,18 +373,18 @@ export default function AdminPage() {
 
   return (
     <div className="min-h-screen bg-solid-gray-50 flex flex-col text-solid-gray-900">
-      {/* スタッフ管理ヘッダー (デジタル庁デザインシステム準拠: 白背景・境界線・チップ) */}
+      {/* スタッフ管理ヘッダー (デジタル庁デザインシステム準拠) */}
       <header className="bg-white border-b border-solid-gray-300 px-6 py-4">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-3">
               <span className="w-1.5 h-6 bg-key-900 rounded-full inline-block shrink-0" aria-hidden="true" />
-              <h1 className="text-xl font-bold tracking-tight text-solid-gray-900">
+              <Heading size="20" className="font-bold text-solid-gray-900 leading-tight">
                 OVALANT 運営ダッシュボード
-              </h1>
-              <StatusBadge className="text-xs py-1 px-2.5">
-                {isFetching ? '同期中...' : 'リアルタイム連携 (Supabase)'}
-                {lastUpdated && <span className="text-solid-gray-200 ml-1">({lastUpdated})</span>}
+              </Heading>
+              <StatusBadge variant="key" size="sm">
+                {isFetching ? '同期中...' : 'リアルタイム連携中'}
+                {lastUpdated && <span className="text-white/80 ml-1">({lastUpdated})</span>}
               </StatusBadge>
             </div>
             <p className="text-xs text-solid-gray-600 mt-1 pl-4.5">
@@ -375,7 +412,7 @@ export default function AdminPage() {
             <Button
               size="sm"
               variant="outline"
-              onClick={handleReset}
+              onClick={openResetModal}
               disabled={actionLoading}
             >
               全リセット
@@ -394,7 +431,7 @@ export default function AdminPage() {
       </header>
 
       <main className="max-w-7xl mx-auto p-6 md:p-8 w-full space-y-6 flex-1">
-        {/* 操作完了フィードバック通知（デジタル庁公式 NotificationBanner） */}
+        {/* 操作フィードバック通知（デジタル庁公式 NotificationBanner） */}
         {actionFeedback && (
           <NotificationBanner
             bannerStyle="standard"
@@ -424,172 +461,213 @@ export default function AdminPage() {
           )}
         </div>
 
-        {/* 下段: 受付グループ一覧テーブル（対戦中・呼出中・待機中を可視化） */}
-        <Card className="bg-white border border-solid-gray-300 rounded-8 p-6">
-        {(() => {
-          const displayGroups = (queueState?.all_active_entries && queueState.all_active_entries.length > 0)
-            ? queueState.all_active_entries
-            : (queueState?.waiting_groups ?? []);
+        {/* 下段: 受付グループ一覧テーブル */}
+        <Card className="p-6">
+          {(() => {
+            const displayGroups = (queueState?.all_active_entries && queueState.all_active_entries.length > 0)
+              ? queueState.all_active_entries
+              : (queueState?.waiting_groups ?? []);
 
-          return (
-            <>
-              <div className="flex items-center justify-between border-b border-solid-gray-200 pb-3 mb-4 flex-wrap gap-2">
-                <div className="flex items-center gap-3">
-                  <Heading size="20" hasChip={true} className="font-bold text-solid-gray-900">
-                    受付エントリー一覧 ({displayGroups.length}組)
-                  </Heading>
-                  {isFetching && <Spinner className="size-4 text-key-900" />}
+            return (
+              <>
+                <div className="flex items-center justify-between border-b border-solid-gray-200 pb-3 mb-4 flex-wrap gap-2">
+                  <div className="flex items-center gap-3">
+                    <Heading size="20" hasChip={true} className="font-bold text-solid-gray-900">
+                      受付エントリー一覧 ({displayGroups.length}組)
+                    </Heading>
+                    {isFetching && <Spinner className="size-4 text-key-900" />}
+                    <span className="text-xs text-solid-gray-600">
+                      (待機中: {queueState?.total_waiting_groups ?? 0}組 / {queueState?.total_waiting_players ?? 0}名)
+                    </span>
+                  </div>
                   <span className="text-xs text-solid-gray-600">
-                    (待機中: {queueState?.total_waiting_groups ?? 0}組 / {queueState?.total_waiting_players ?? 0}名)
+                    💡 サジェスト: {queueState?.suggestion_tip.message}
                   </span>
                 </div>
-                <span className="text-xs text-solid-gray-500">
-                  💡 サジェスト: {queueState?.suggestion_tip.message}
-                </span>
-              </div>
 
-              {!queueState ? (
-                <div className="py-12 flex flex-col items-center justify-center gap-2 text-xs text-solid-gray-500">
-                  <Spinner className="size-5 text-key-900" />
-                  <span>待機キューの状況を取得中...</span>
-                </div>
-              ) : displayGroups.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead>
-                      <tr className="border-b bg-solid-gray-100 text-solid-gray-700">
-                        <th className="py-2.5 px-3 font-semibold">整理券</th>
-                        <th className="py-2.5 px-3 font-semibold">チーム名</th>
-                        <th className="py-2.5 px-3 font-semibold">代表者名</th>
-                        <th className="py-2.5 px-3 font-semibold">人数</th>
-                        <th className="py-2.5 px-3 font-semibold">希望</th>
-                        <th className="py-2.5 px-3 font-semibold">現在状況</th>
-                        <th className="py-2.5 px-3 font-semibold">受付時刻</th>
-                        <th className="py-2.5 px-3 font-semibold text-right">操作</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-solid-gray-200">
-                      {displayGroups.map((group) => {
-                        let statusLabel = '待機中';
-                        let statusBadgeStyle = 'bg-solid-gray-536';
+                {!queueState ? (
+                  <div className="py-12 flex flex-col items-center justify-center gap-2 text-xs text-solid-gray-500">
+                    <Spinner className="size-5 text-key-900" />
+                    <span>待機キューの状況を取得中...</span>
+                  </div>
+                ) : displayGroups.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="border-b bg-solid-gray-100 text-solid-gray-800">
+                          <th className="py-2.5 px-3 font-bold">整理券</th>
+                          <th className="py-2.5 px-3 font-bold">チーム名</th>
+                          <th className="py-2.5 px-3 font-bold">代表者名</th>
+                          <th className="py-2.5 px-3 font-bold">人数</th>
+                          <th className="py-2.5 px-3 font-bold">希望形式</th>
+                          <th className="py-2.5 px-3 font-bold">現在状況</th>
+                          <th className="py-2.5 px-3 font-bold">受付時刻</th>
+                          <th className="py-2.5 px-3 font-bold text-right">操作</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-solid-gray-200">
+                        {displayGroups.map((group) => {
+                          let statusLabel = '待機中';
+                          let badgeVariant: StatusBadgeVariant = 'gray';
 
-                        if (group.status === 'in_match') {
-                          statusLabel = '対戦中';
-                          statusBadgeStyle = 'bg-key-900';
-                        } else if (group.status === 'called') {
-                          if (group.assigned_match_id === queueState.next_match?.id) {
-                            statusLabel = '呼出中 (Next)';
-                            statusBadgeStyle = 'bg-key-800';
-                          } else if (group.assigned_match_id === queueState.next_next_match?.id) {
-                            statusLabel = '次回呼出 (その次)';
-                            statusBadgeStyle = 'bg-solid-gray-700';
-                          } else {
-                            statusLabel = '枠割当済';
-                            statusBadgeStyle = 'bg-solid-gray-600';
+                          if (group.status === 'in_match') {
+                            statusLabel = '対戦中';
+                            badgeVariant = 'key';
+                          } else if (group.status === 'called') {
+                            if (group.assigned_match_id === queueState.next_match?.id) {
+                              statusLabel = '呼出中 (Next)';
+                              badgeVariant = 'key';
+                            } else if (group.assigned_match_id === queueState.next_next_match?.id) {
+                              statusLabel = '次回呼出 (その次)';
+                              badgeVariant = 'gray';
+                            } else {
+                              statusLabel = '枠割当済';
+                              badgeVariant = 'gray';
+                            }
+                          } else if (group.status === 'skipped') {
+                            statusLabel = '不在スキップ';
+                            badgeVariant = 'error';
                           }
-                        } else if (group.status === 'skipped') {
-                          statusLabel = '不在スキップ';
-                          statusBadgeStyle = 'bg-solid-gray-400';
-                        }
 
-                        return (
-                          <tr key={group.id} className="hover:bg-solid-gray-50 transition-colors">
-                            <td className="py-2.5 px-3 font-bold text-key-900">#{group.entry_number}</td>
-                            <td className="py-2.5 px-3 font-bold text-solid-gray-900">{group.team_name}</td>
-                            <td className="py-2.5 px-3 text-solid-gray-600">{group.leader_name}</td>
-                            <td className="py-2.5 px-3 font-bold">{group.headcount}名</td>
-                            <td className="py-2.5 px-3">
-                              <span
-                                className={`px-2 py-0.5 rounded-4 text-[10px] font-bold ${
-                                  group.preference === 'closed'
-                                    ? 'bg-solid-gray-200 text-solid-gray-800 border border-solid-gray-400'
-                                    : 'bg-key-50 text-key-900 border border-key-300'
-                                }`}
-                              >
-                                {group.preference === 'closed' ? '貸切(8分)' : '合流(10分)'}
-                              </span>
-                            </td>
-                            <td className="py-2.5 px-3">
-                              <StatusBadge className={`${statusBadgeStyle} text-[10px] py-0.5 px-2`}>
-                                {statusLabel}
-                              </StatusBadge>
-                            </td>
-                            <td className="py-2.5 px-3 text-solid-gray-500">
-                              {new Date(group.created_at).toLocaleTimeString('ja-JP')}
-                            </td>
-                            <td className="py-2.5 px-3 text-right">
-                              {group.status !== 'skipped' && (
-                                <Button
-                                  size="xs"
-                                  variant="outline"
-                                  onClick={() => openSkipModal(group)}
-                                  disabled={actionLoading}
+                          return (
+                            <tr key={group.id} className="hover:bg-solid-gray-50 transition-colors">
+                              <td className="py-2.5 px-3 font-bold text-key-900">#{group.entry_number}</td>
+                              <td className="py-2.5 px-3 font-bold text-solid-gray-900">{group.team_name}</td>
+                              <td className="py-2.5 px-3 text-solid-gray-700">{group.leader_name}</td>
+                              <td className="py-2.5 px-3 font-bold">{group.headcount}名</td>
+                              <td className="py-2.5 px-3">
+                                <StatusBadge
+                                  variant={group.preference === 'closed' ? 'gray' : 'key'}
+                                  size="sm"
                                 >
-                                  不在スキップ
-                                </Button>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="py-12 text-center text-xs text-solid-gray-400">現在、エントリー中のグループはありません。</div>
-              )}
-            </>
-          );
-        })()}
-      </Card>
+                                  {group.preference === 'closed' ? '貸切(8分)' : '合流(10分)'}
+                                </StatusBadge>
+                              </td>
+                              <td className="py-2.5 px-3">
+                                <StatusBadge variant={badgeVariant} size="sm">
+                                  {statusLabel}
+                                </StatusBadge>
+                              </td>
+                              <td className="py-2.5 px-3 text-solid-gray-600">
+                                {new Date(group.created_at).toLocaleTimeString('ja-JP')}
+                              </td>
+                              <td className="py-2.5 px-3 text-right">
+                                {group.status !== 'skipped' && (
+                                  <Button
+                                    size="xs"
+                                    variant="outline"
+                                    onClick={() => openSkipModal(group)}
+                                    disabled={actionLoading}
+                                  >
+                                    不在スキップ
+                                  </Button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="py-12 text-center text-xs text-solid-gray-500">
+                    現在、エントリー中のグループはありません。
+                  </div>
+                )}
+              </>
+            );
+          })()}
+        </Card>
 
-      {/* 不在スキップ確認モーダルダイアログ (デジタル庁公式コンポーネント) */}
-      <ModalDialog ref={skipDialogRef}>
-        <ModalDialogContent className="max-w-md">
-          <ModalDialogHeader>
-            <ModalDialogHeading className="text-lg font-bold text-solid-gray-900">
-              ⚠️ 不在スキップの確認
-            </ModalDialogHeading>
-            <ModalDialogClose onClick={closeSkipModal} />
-          </ModalDialogHeader>
-          <ModalDialogBody>
-            <div className="space-y-2 text-sm text-solid-gray-800">
-              <p>
-                以下のグループを<strong>不在としてスキップ（無効化）</strong>しますか？
-              </p>
-              {skipTarget && (
-                <div className="p-3 bg-solid-gray-50 border border-solid-gray-300 rounded-8 my-2 font-bold text-xs text-solid-gray-900">
-                  #{skipTarget.entry_number} {skipTarget.team_name} (代表: {skipTarget.leader_name} / {skipTarget.headcount}名)
-                </div>
-              )}
-              <p className="text-xs text-solid-gray-600">
-                ※ スキップされたグループはキューから除外され、再エントリーが必要になります。
-                合流対戦(Open)でマッチングしていた相方グループは自動的に待機キュー最優先に戻り、即座に再マッチングされます。
-              </p>
-            </div>
-          </ModalDialogBody>
-          <ModalDialogActions className="flex justify-end gap-2">
-            <Button size="sm" variant="outline" onClick={closeSkipModal} disabled={actionLoading}>
-              キャンセル
-            </Button>
-            <Button
-              size="sm"
-              variant="solid-fill"
-              className="min-w-32"
-              onClick={handleConfirmSkip}
-              disabled={actionLoading}
-            >
-              {actionLoading ? (
-                <span className="flex items-center justify-center gap-1.5">
-                  <Spinner className="size-3.5" /> スキップ処理中...
-                </span>
-              ) : (
-                'スキップを実行する'
-              )}
-            </Button>
-          </ModalDialogActions>
-        </ModalDialogContent>
-      </ModalDialog>
+        {/* 不在スキップ確認モーダルダイアログ (デジタル庁公式コンポーネント) */}
+        <ModalDialog ref={skipDialogRef}>
+          <ModalDialogContent className="max-w-md">
+            <ModalDialogHeader>
+              <ModalDialogHeading className="text-lg font-bold text-solid-gray-900">
+                ⚠️ 不在スキップの確認
+              </ModalDialogHeading>
+              <ModalDialogClose onClick={closeSkipModal} />
+            </ModalDialogHeader>
+            <ModalDialogBody>
+              <div className="space-y-3 text-sm text-solid-gray-800">
+                <p>
+                  以下のグループを<strong>不在としてスキップ（無効化）</strong>しますか？
+                </p>
+                {skipTarget && (
+                  <div className="p-3 bg-solid-gray-50 border border-solid-gray-300 rounded-8 font-bold text-xs text-solid-gray-900">
+                    #{skipTarget.entry_number} {skipTarget.team_name} (代表: {skipTarget.leader_name} / {skipTarget.headcount}名)
+                  </div>
+                )}
+                <p className="text-xs text-solid-gray-600 leading-relaxed">
+                  ※ スキップされたグループはキューから除外され、再エントリーが必要になります。
+                  合流対戦(Open)でマッチングしていた相方グループは自動的に待機キュー最優先に戻り、即座に再マッチングされます。
+                </p>
+              </div>
+            </ModalDialogBody>
+            <ModalDialogActions className="flex justify-end gap-2">
+              <Button size="sm" variant="outline" onClick={closeSkipModal} disabled={actionLoading}>
+                キャンセル
+              </Button>
+              <Button
+                size="sm"
+                variant="solid-fill"
+                className="min-w-32 font-bold"
+                onClick={handleConfirmSkip}
+                disabled={actionLoading}
+              >
+                {actionLoading ? (
+                  <span className="flex items-center justify-center gap-1.5">
+                    <Spinner className="size-3.5" /> スキップ処理中...
+                  </span>
+                ) : (
+                  'スキップを実行する'
+                )}
+              </Button>
+            </ModalDialogActions>
+          </ModalDialogContent>
+        </ModalDialog>
+
+        {/* 全リセット確認モーダルダイアログ (デジタル庁公式コンポーネント) */}
+        <ModalDialog ref={resetDialogRef}>
+          <ModalDialogContent className="max-w-md">
+            <ModalDialogHeader>
+              <ModalDialogHeading className="text-lg font-bold text-solid-gray-900">
+                ⚠️ 全データ初期化の確認
+              </ModalDialogHeading>
+              <ModalDialogClose onClick={closeResetModal} />
+            </ModalDialogHeader>
+            <ModalDialogBody>
+              <div className="space-y-3 text-sm text-solid-gray-800">
+                <p className="font-bold text-error-1">
+                  本当にすべての試合スロットおよび待機エントリーを初期化（空にリセット）しますか？
+                </p>
+                <p className="text-xs text-solid-gray-600 leading-relaxed">
+                  ※ 進行中の試合、呼出中・準備中の枠、待機キュー内のすべてのエントリー情報が削除されます。この操作は元に戻せません。
+                </p>
+              </div>
+            </ModalDialogBody>
+            <ModalDialogActions className="flex justify-end gap-2">
+              <Button size="sm" variant="outline" onClick={closeResetModal} disabled={actionLoading}>
+                キャンセル
+              </Button>
+              <Button
+                size="sm"
+                variant="solid-fill"
+                className="min-w-32 font-bold bg-error-1 hover:bg-error-2"
+                onClick={handleConfirmReset}
+                disabled={actionLoading}
+              >
+                {actionLoading ? (
+                  <span className="flex items-center justify-center gap-1.5">
+                    <Spinner className="size-3.5" /> 初期化中...
+                  </span>
+                ) : (
+                  '初期化を実行する'
+                )}
+              </Button>
+            </ModalDialogActions>
+          </ModalDialogContent>
+        </ModalDialog>
       </main>
     </div>
   );

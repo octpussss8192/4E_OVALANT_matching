@@ -47,7 +47,7 @@ export default function ParticipantPage() {
   const isCalled = myEntryInfo?.entry.status === 'called';
   useWakeLock(isCalled);
 
-  // 定期ポーリングによる状態更新 (3秒毎)
+  // リアルタイム反映 + 定期ポーリング (3秒毎)
   useEffect(() => {
     let timer: NodeJS.Timeout;
 
@@ -90,7 +90,7 @@ export default function ParticipantPage() {
     e.preventDefault();
     if (!sessionId) return;
     if (!leaderName.trim() || !teamName.trim()) {
-      setErrorMessage('代表者名とチーム名を入力してください。');
+      setErrorMessage('代表者氏名とチーム名を入力してください。');
       return;
     }
 
@@ -115,8 +115,8 @@ export default function ParticipantPage() {
   };
 
   return (
-    <main className="min-h-screen bg-solid-gray-50 pb-16">
-      {/* ネットワーク切断時の緊急バナー */}
+    <main className="min-h-screen bg-solid-gray-50 pb-16 text-solid-gray-900">
+      {/* ネットワーク切断時の緊急バナー (デジタル庁 EmergencyBanner) */}
       {isOffline && (
         <div className="sticky top-0 z-50">
           <EmergencyBanner className="text-center font-bold">
@@ -131,7 +131,9 @@ export default function ParticipantPage() {
           <div className="flex items-center gap-3">
             <span className="w-1.5 h-6 bg-key-900 rounded-full inline-block shrink-0" aria-hidden="true" />
             <div>
-              <h1 className="text-lg font-bold tracking-tight text-solid-gray-900">OVALANT</h1>
+              <Heading size="20" className="font-bold text-solid-gray-900 leading-tight">
+                OVALANT
+              </Heading>
               <p className="text-xs text-solid-gray-600">3v3 赤外線シューティング マッチング</p>
             </div>
           </div>
@@ -143,18 +145,16 @@ export default function ParticipantPage() {
         </div>
       </header>
 
-      <div className="max-w-xl mx-auto px-4 mt-6">
-        {/* サジェストTipsバナー */}
+      <div className="max-w-xl mx-auto px-4 mt-6 space-y-6">
+        {/* サジェストTipsバナー (デジタル庁 NotificationBanner) */}
         {queueState && (
-          <div className="mb-6">
-            <NotificationBanner
-              bannerStyle="standard"
-              type="info1"
-              title="リアルタイム案内"
-            >
-              <span className="text-sm">{queueState.suggestion_tip.message}</span>
-            </NotificationBanner>
-          </div>
+          <NotificationBanner
+            bannerStyle="standard"
+            type="info1"
+            title="リアルタイム案内"
+          >
+            <span className="text-sm">{queueState.suggestion_tip.message}</span>
+          </NotificationBanner>
         )}
 
         {/* 状態に応じた画面表示 */}
@@ -177,11 +177,11 @@ export default function ParticipantPage() {
 
                 <div className="mt-3 flex items-center justify-center">
                   {isCalled ? (
-                    <span className="inline-block bg-key-900 text-white font-bold px-4 py-2 rounded-8 text-base">
+                    <StatusBadge variant="key" size="md">
                       📢 呼出中 (受付へお越しください)
-                    </span>
+                    </StatusBadge>
                   ) : (
-                    <StatusBadge className="bg-solid-gray-536 text-sm px-3 py-1">
+                    <StatusBadge variant="gray" size="md">
                       {myEntryInfo.slot_name === 'next_next'
                         ? '次々回 試合枠 (準備待機)'
                         : myEntryInfo.slot_name === 'next'
@@ -192,8 +192,16 @@ export default function ParticipantPage() {
                 </div>
 
                 {isCalled && (
-                  <div className="mt-4 p-4 bg-key-50 rounded-8 border border-key-300 text-key-900 font-bold text-sm leading-relaxed">
-                    🔔 お待たせしました！受付スタッフへこの画面をお見せください。
+                  <div className="mt-5 text-left">
+                    <NotificationBanner
+                      bannerStyle="color-chip"
+                      type="info1"
+                      title="受付呼出中"
+                    >
+                      <span className="font-bold text-sm">
+                        お待たせしました！受付スタッフへこの画面をお見せください。
+                      </span>
+                    </NotificationBanner>
                   </div>
                 )}
               </div>
@@ -216,33 +224,44 @@ export default function ParticipantPage() {
               </div>
 
               <div className="mt-4 text-xs text-solid-gray-600 border-t border-solid-gray-200 pt-3 flex justify-between">
-                <span>チーム名: <strong>{myEntryInfo.entry.team_name}</strong></span>
-                <span>人数: <strong>{myEntryInfo.entry.headcount}名</strong></span>
-                <span>モード: <strong>{myEntryInfo.entry.preference === 'closed' ? '貸切(8分)' : '合流(10分)'}</strong></span>
+                <span>チーム名: <strong className="text-solid-gray-900">{myEntryInfo.entry.team_name}</strong></span>
+                <span>人数: <strong className="text-solid-gray-900">{myEntryInfo.entry.headcount}名</strong></span>
+                <span>モード: <strong className="text-solid-gray-900">{myEntryInfo.entry.preference === 'closed' ? '貸切(8分)' : '合流(10分)'}</strong></span>
               </div>
             </Card>
 
-            <div className="bg-white p-4 rounded-8 border border-solid-gray-200 text-xs text-solid-gray-600 space-y-1">
-              <p className="font-semibold text-solid-gray-800">⚠️ ご案内と注意事項</p>
-              <p>・呼出時に受付におられない場合、不在スキップとなり再エントリーが必要になります。</p>
-              <p>・「呼出中」の画面は消灯しないよう画面ロック防止機能が働きます。</p>
-            </div>
+            <NotificationBanner
+              bannerStyle="color-chip"
+              type="info2"
+              title="ご案内と注意事項"
+            >
+              <ul className="list-disc pl-4 space-y-1 text-xs text-solid-gray-700">
+                <li>呼出時に受付におられない場合、不在スキップとなり再エントリーが必要になります。</li>
+                <li>「呼出中」の画面は消灯しないよう画面ロック防止機能が働きます。</li>
+              </ul>
+            </NotificationBanner>
           </div>
         ) : (
           /* 未エントリー: 受付フォーム */
-          <Card className="bg-white shadow-sm">
+          <Card>
             <Heading size="20" hasChip={true} className="mb-4 pb-2 border-b border-solid-gray-200 font-bold">
               マッチングエントリー登録
             </Heading>
 
             {errorMessage && (
-              <div className="mb-4 p-3 bg-red-50 border border-red-300 text-red-800 text-xs rounded-6">
-                {errorMessage}
+              <div className="mb-4">
+                <NotificationBanner
+                  bannerStyle="standard"
+                  type="error"
+                  title="入力エラー"
+                >
+                  <span className="text-sm">{errorMessage}</span>
+                </NotificationBanner>
               </div>
             )}
 
             <form onSubmit={handleSubmit} className="space-y-5">
-              {/* 代表者名 */}
+              {/* 代表者氏名 */}
               <div>
                 <div className="flex items-center gap-2 mb-1">
                   <Label htmlFor="leader-name" className="text-sm font-bold">代表者氏名</Label>
@@ -255,7 +274,9 @@ export default function ParticipantPage() {
                   required
                   className="w-full"
                 />
-                <SupportText className="text-xs text-solid-gray-500 mt-1">受付呼出時にお呼びする氏名です</SupportText>
+                <SupportText className="text-xs text-solid-gray-600 mt-1">
+                  受付呼出時にお呼びする氏名です
+                </SupportText>
               </div>
 
               {/* チーム名 */}
@@ -271,7 +292,9 @@ export default function ParticipantPage() {
                   required
                   className="w-full"
                 />
-                <SupportText className="text-xs text-solid-gray-500 mt-1">モニタに表示されるチーム名です</SupportText>
+                <SupportText className="text-xs text-solid-gray-600 mt-1">
+                  会場モニタに表示されるチーム名です
+                </SupportText>
               </div>
 
               {/* 人数選択 */}
@@ -287,7 +310,7 @@ export default function ParticipantPage() {
                       className={`flex flex-col items-center justify-center p-2 rounded-8 border cursor-pointer min-h-touch text-center transition-all ${
                         headcount === num
                           ? 'bg-key-50 border-key-900 font-bold text-key-900 ring-2 ring-key-900'
-                          : 'border-solid-gray-300 hover:border-solid-gray-500'
+                          : 'border-solid-gray-300 hover:border-solid-gray-600 bg-white'
                       }`}
                     >
                       <input
@@ -299,7 +322,7 @@ export default function ParticipantPage() {
                         className="sr-only"
                       />
                       <span className="text-base">{num}</span>
-                      <span className="text-[10px] text-solid-gray-500">名</span>
+                      <span className="text-[10px] text-solid-gray-600">名</span>
                     </label>
                   ))}
                 </div>
@@ -320,8 +343,8 @@ export default function ParticipantPage() {
                       preference === 'open' && headcount <= 3
                         ? 'bg-key-50 border-key-900 ring-2 ring-key-900'
                         : headcount >= 4
-                        ? 'opacity-40 cursor-not-allowed bg-solid-gray-100 border-solid-gray-200'
-                        : 'border-solid-gray-300'
+                        ? 'opacity-40 cursor-not-allowed bg-solid-gray-100 border-solid-gray-300'
+                        : 'border-solid-gray-300 bg-white'
                     }`}
                   >
                     <div className="flex items-center gap-2">
@@ -343,7 +366,7 @@ export default function ParticipantPage() {
                     className={`block p-3 rounded-8 border cursor-pointer min-h-touch ${
                       preference === 'closed'
                         ? 'bg-key-50 border-key-900 ring-2 ring-key-900'
-                        : 'border-solid-gray-300'
+                        : 'border-solid-gray-300 bg-white'
                     }`}
                   >
                     <div className="flex items-center gap-2">
@@ -368,7 +391,7 @@ export default function ParticipantPage() {
                   type="submit"
                   size="lg"
                   variant="solid-fill"
-                  className="w-full justify-center min-h-touch text-base"
+                  className="w-full justify-center min-h-touch text-base font-bold"
                   disabled={submitting}
                 >
                   {submitting ? 'エントリー送信中…' : 'エントリーを確定する'}
