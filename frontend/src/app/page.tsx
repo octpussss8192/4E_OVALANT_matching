@@ -13,6 +13,12 @@ import {
   RequirementBadge,
   SupportText,
   Label,
+  StepNavigation,
+  StepNavigationList,
+  StepNavigationStep,
+  StepNavigationStepHeader,
+  StepNavigationNumber,
+  StepNavigationTitle,
 } from '@/design-system';
 import { useSessionId } from '@/hooks/useSessionId';
 import { useWakeLock } from '@/hooks/useWakeLock';
@@ -161,6 +167,44 @@ export default function ParticipantPage() {
         {myEntryInfo ? (
           /* エントリー済: 待機または呼出中画面 */
           <div className="space-y-6">
+            {/* StepNavigation による進行状況ステップ表示 (デジタル庁公式コンポーネント) */}
+            <div className="bg-white p-4 rounded-8 border border-solid-gray-300">
+              <StepNavigation orientation="horizontal" size="small">
+                <StepNavigationList>
+                  <StepNavigationStep state="completed" first>
+                    <StepNavigationStepHeader>
+                      <StepNavigationNumber>1</StepNavigationNumber>
+                      <StepNavigationTitle>受付完了</StepNavigationTitle>
+                    </StepNavigationStepHeader>
+                  </StepNavigationStep>
+                  <StepNavigationStep
+                    state={isCalled ? 'completed' : 'reached'}
+                    aria-current={!isCalled ? 'step' : undefined}
+                  >
+                    <StepNavigationStepHeader>
+                      <StepNavigationNumber>2</StepNavigationNumber>
+                      <StepNavigationTitle>待機中</StepNavigationTitle>
+                    </StepNavigationStepHeader>
+                  </StepNavigationStep>
+                  <StepNavigationStep
+                    state={isCalled ? 'reached' : undefined}
+                    aria-current={isCalled ? 'step' : undefined}
+                  >
+                    <StepNavigationStepHeader>
+                      <StepNavigationNumber>3</StepNavigationNumber>
+                      <StepNavigationTitle>受付呼出</StepNavigationTitle>
+                    </StepNavigationStepHeader>
+                  </StepNavigationStep>
+                  <StepNavigationStep last>
+                    <StepNavigationStepHeader>
+                      <StepNavigationNumber>4</StepNavigationNumber>
+                      <StepNavigationTitle>対戦</StepNavigationTitle>
+                    </StepNavigationStepHeader>
+                  </StepNavigationStep>
+                </StepNavigationList>
+              </StepNavigation>
+            </div>
+
             <Card
               variant={isCalled ? 'key' : 'default'}
               className={isCalled ? 'border-2 border-key-900' : ''}
@@ -206,28 +250,40 @@ export default function ParticipantPage() {
                 )}
               </div>
 
-              <div className="border-t border-solid-gray-200 mt-4 pt-4 grid grid-cols-2 gap-4 text-center">
-                <div className="bg-solid-gray-100 p-3 rounded-8">
-                  <div className="text-xs text-solid-gray-600">前の待機組数</div>
-                  <div className="text-2xl font-bold text-solid-gray-900 mt-0.5">
+              {/* 定義リスト（dl/dt/dd）によるクリーンな情報表示（余計なグレータイルネストを解消） */}
+              <dl className="border-t border-solid-gray-200 mt-4 pt-4 grid grid-cols-2 gap-4 text-center">
+                <div className="py-2">
+                  <dt className="text-xs text-solid-gray-600">前の待機組数</dt>
+                  <dd className="text-3xl font-bold text-solid-gray-900 mt-1">
                     {myEntryInfo.ahead_groups_count}
-                    <span className="text-xs font-normal ml-1">組</span>
-                  </div>
+                    <span className="text-sm font-normal ml-1">組</span>
+                  </dd>
                 </div>
-                <div className="bg-solid-gray-100 p-3 rounded-8">
-                  <div className="text-xs text-solid-gray-600">予想待ち時間</div>
-                  <div className="text-2xl font-bold text-solid-gray-900 mt-0.5">
+                <div className="py-2 border-l border-solid-gray-200">
+                  <dt className="text-xs text-solid-gray-600">予想待ち時間</dt>
+                  <dd className="text-3xl font-bold text-solid-gray-900 mt-1">
                     約 {myEntryInfo.estimated_wait_minutes}
-                    <span className="text-xs font-normal ml-1">分</span>
-                  </div>
+                    <span className="text-sm font-normal ml-1">分</span>
+                  </dd>
                 </div>
-              </div>
+              </dl>
 
-              <div className="mt-4 text-xs text-solid-gray-600 border-t border-solid-gray-200 pt-3 flex justify-between">
-                <span>チーム名: <strong className="text-solid-gray-900">{myEntryInfo.entry.team_name}</strong></span>
-                <span>人数: <strong className="text-solid-gray-900">{myEntryInfo.entry.headcount}名</strong></span>
-                <span>モード: <strong className="text-solid-gray-900">{myEntryInfo.entry.preference === 'closed' ? '貸切(8分)' : '合流(10分)'}</strong></span>
-              </div>
+              <dl className="mt-4 text-xs text-solid-gray-600 border-t border-solid-gray-200 pt-3 flex justify-between">
+                <div>
+                  <dt className="inline text-solid-gray-600">チーム名: </dt>
+                  <dd className="inline font-bold text-solid-gray-900">{myEntryInfo.entry.team_name}</dd>
+                </div>
+                <div>
+                  <dt className="inline text-solid-gray-600">人数: </dt>
+                  <dd className="inline font-bold text-solid-gray-900">{myEntryInfo.entry.headcount}名</dd>
+                </div>
+                <div>
+                  <dt className="inline text-solid-gray-600">モード: </dt>
+                  <dd className="inline font-bold text-solid-gray-900">
+                    {myEntryInfo.entry.preference === 'closed' ? '貸切(8分)' : '合流(10分)'}
+                  </dd>
+                </div>
+              </dl>
             </Card>
 
             <NotificationBanner
@@ -298,92 +354,73 @@ export default function ParticipantPage() {
               </div>
 
               {/* 人数選択 */}
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <Label className="text-sm font-bold">参加人数 (1〜6名)</Label>
+              <fieldset>
+                <div className="flex items-center gap-2 mb-2">
+                  <legend className="text-sm font-bold text-solid-gray-900">参加人数 (1〜6名)</legend>
                   <RequirementBadge>※必須</RequirementBadge>
                 </div>
-                <div className="grid grid-cols-6 gap-2">
+                <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
                   {[1, 2, 3, 4, 5, 6].map((num) => (
-                    <label
+                    <div
                       key={num}
-                      className={`flex flex-col items-center justify-center p-2 rounded-8 border cursor-pointer min-h-touch text-center transition-all ${
-                        headcount === num
-                          ? 'bg-key-50 border-key-900 font-bold text-key-900 ring-2 ring-key-900'
-                          : 'border-solid-gray-300 hover:border-solid-gray-600 bg-white'
-                      }`}
+                      className="border border-solid-gray-300 rounded-8 p-2 flex items-center justify-center min-h-touch bg-white"
                     >
-                      <input
-                        type="radio"
+                      <Radio
                         name="headcount"
                         value={num}
                         checked={headcount === num}
                         onChange={() => setHeadcount(num)}
-                        className="sr-only"
-                      />
-                      <span className="text-base">{num}</span>
-                      <span className="text-[10px] text-solid-gray-600">名</span>
-                    </label>
+                        size="sm"
+                      >
+                        <span className="font-bold text-sm text-solid-gray-900">{num}名</span>
+                      </Radio>
+                    </div>
                   ))}
                 </div>
                 <SupportText className="text-xs text-solid-gray-600 mt-1">
                   ※ 4名以上のグループは友人が敵味方に分断されるのを防ぐため自動的に「貸切・身内戦」となります。
                 </SupportText>
-              </div>
+              </fieldset>
 
               {/* マッチング希望形式 */}
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <Label className="text-sm font-bold">マッチング希望</Label>
+              <fieldset>
+                <div className="flex items-center gap-2 mb-2">
+                  <legend className="text-sm font-bold text-solid-gray-900">マッチング希望</legend>
                   <RequirementBadge>※必須</RequirementBadge>
                 </div>
-                <div className="space-y-2">
-                  <label
-                    className={`block p-3 rounded-8 border cursor-pointer min-h-touch ${
-                      preference === 'open' && headcount <= 3
-                        ? 'bg-key-50 border-key-900 ring-2 ring-key-900'
-                        : headcount >= 4
-                        ? 'opacity-40 cursor-not-allowed bg-solid-gray-100 border-solid-gray-300'
-                        : 'border-solid-gray-300 bg-white'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <Radio
-                        name="preference"
-                        value="open"
-                        checked={preference === 'open' && headcount <= 3}
-                        onChange={() => setPreference('open')}
-                        disabled={headcount >= 4}
-                      />
+                <div className="space-y-3">
+                  <div className={`p-3 rounded-8 border border-solid-gray-300 bg-white ${headcount >= 4 ? 'opacity-50' : ''}`}>
+                    <Radio
+                      name="preference"
+                      value="open"
+                      checked={preference === 'open' && headcount <= 3}
+                      onChange={() => setPreference('open')}
+                      aria-disabled={headcount >= 4}
+                      size="md"
+                    >
                       <span className="font-bold text-sm text-solid-gray-900">他グループと合流対戦 (Open)</span>
-                    </div>
-                    <p className="text-xs text-solid-gray-600 mt-1 pl-7">
+                    </Radio>
+                    <p className="text-xs text-solid-gray-600 mt-1 pl-10">
                       他の来場者と3vs3でマッチング。試合時間 10分。マッチングが早くなる可能性があります。
                     </p>
-                  </label>
+                  </div>
 
-                  <label
-                    className={`block p-3 rounded-8 border cursor-pointer min-h-touch ${
-                      preference === 'closed'
-                        ? 'bg-key-50 border-key-900 ring-2 ring-key-900'
-                        : 'border-solid-gray-300 bg-white'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <Radio
-                        name="preference"
-                        value="closed"
-                        checked={preference === 'closed'}
-                        onChange={() => setPreference('closed')}
-                      />
+                  <div className="p-3 rounded-8 border border-solid-gray-300 bg-white">
+                    <Radio
+                      name="preference"
+                      value="closed"
+                      checked={preference === 'closed'}
+                      onChange={() => setPreference('closed')}
+                      size="md"
+                    >
                       <span className="font-bold text-sm text-solid-gray-900">自分たちだけで貸切・身内戦 (Closed)</span>
-                    </div>
-                    <p className="text-xs text-solid-gray-600 mt-1 pl-7">
+                    </Radio>
+                    <p className="text-xs text-solid-gray-600 mt-1 pl-10">
                       他のグループと混ざらず対戦。試合時間 8分（少し短縮枠となります）。
                     </p>
-                  </label>
+                  </div>
                 </div>
-              </div>
+              </fieldset>
 
               {/* 送信ボタン */}
               <div className="pt-2">
@@ -392,7 +429,7 @@ export default function ParticipantPage() {
                   size="lg"
                   variant="solid-fill"
                   className="w-full justify-center min-h-touch text-base font-bold"
-                  disabled={submitting}
+                  aria-disabled={submitting}
                 >
                   {submitting ? 'エントリー送信中…' : 'エントリーを確定する'}
                 </Button>

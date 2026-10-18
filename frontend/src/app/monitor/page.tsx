@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Card, NotificationBanner, Button } from '@/design-system';
+import { Card, NotificationBanner, Button, Heading, StatusBadge } from '@/design-system';
 import { getQueueStatus } from '@/lib/api';
 import { subscribeToMatchUpdates } from '@/lib/supabase';
 import type { QueueStatusResponse, Match } from '@/types';
@@ -37,10 +37,9 @@ export default function MonitorPage() {
     return (
       <Card className="flex flex-col h-full bg-white border border-solid-gray-300 rounded-8 p-6">
         {/* スロット見出し (デジタル庁デザインシステム仕様: 白背景・クリーンなチップ付き見出し) */}
-        <div className="flex items-center gap-2.5 pb-3 mb-4 border-b border-solid-gray-200">
-          <span className="w-1.5 h-5 bg-key-900 rounded-full inline-block shrink-0" aria-hidden="true" />
-          <h2 className="text-lg font-bold text-solid-gray-900 tracking-tight">{title}</h2>
-        </div>
+        <Heading size="20" hasChip={true} className="font-bold text-solid-gray-900 tracking-tight pb-3 mb-4 border-b border-solid-gray-200">
+          {title}
+        </Heading>
 
         {match ? (
           <div className="flex-1 flex flex-col justify-between">
@@ -87,12 +86,11 @@ export default function MonitorPage() {
                   <div className="space-y-4">
                     {/* 赤チーム */}
                     <div>
-                      <div className="flex items-center justify-between pb-1.5 border-b-2 border-error-1 text-xs font-bold text-solid-gray-900">
-                        <div className="flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full bg-error-1 inline-block shrink-0" aria-hidden="true" />
-                          <span>赤チーム (RED)</span>
-                        </div>
-                        <span className="text-solid-gray-700 font-semibold">{match.teams.red.total_count}名</span>
+                      <div className="flex items-center justify-between pb-2 mb-1 border-b border-solid-gray-300">
+                        <StatusBadge variant="error" size="sm">
+                          赤チーム (RED)
+                        </StatusBadge>
+                        <span className="text-xs text-solid-gray-700 font-semibold">{match.teams.red.total_count}名</span>
                       </div>
                       <ul className="divide-y divide-solid-gray-200 text-sm">
                         {match.teams.red.groups.map((g) => (
@@ -109,12 +107,11 @@ export default function MonitorPage() {
 
                     {/* 青チーム */}
                     <div>
-                      <div className="flex items-center justify-between pb-1.5 border-b-2 border-key-900 text-xs font-bold text-solid-gray-900">
-                        <div className="flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full bg-key-900 inline-block shrink-0" aria-hidden="true" />
-                          <span>青チーム (BLUE)</span>
-                        </div>
-                        <span className="text-solid-gray-700 font-semibold">{match.teams.blue.total_count}名</span>
+                      <div className="flex items-center justify-between pb-2 mb-1 border-b border-solid-gray-300">
+                        <StatusBadge variant="key" size="sm">
+                          青チーム (BLUE)
+                        </StatusBadge>
+                        <span className="text-xs text-solid-gray-700 font-semibold">{match.teams.blue.total_count}名</span>
                       </div>
                       <ul className="divide-y divide-solid-gray-200 text-sm">
                         {match.teams.blue.groups.map((g) => (
@@ -167,14 +164,11 @@ export default function MonitorPage() {
       {/* 画面上部ヘッダー (デジタル庁デザインシステム準拠) */}
       <header className="bg-white border-b border-solid-gray-300 px-6 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <span className="w-1.5 h-7 bg-key-900 rounded-full inline-block shrink-0" aria-hidden="true" />
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight text-solid-gray-900 leading-tight">
-                OVALANT 3v3 会場進行モニタ
-              </h1>
-              <p className="text-xs text-solid-gray-600">リアルタイム試合進行・対戦組合せ表示</p>
-            </div>
+          <div>
+            <Heading size="24" hasChip={true} className="font-bold text-solid-gray-900 leading-tight">
+              OVALANT 3v3 会場進行モニタ
+            </Heading>
+            <p className="text-xs text-solid-gray-600 mt-1 pl-4.5">リアルタイム試合進行・対戦組合せ表示</p>
           </div>
           <div className="flex items-center gap-6">
             <div className="text-right">

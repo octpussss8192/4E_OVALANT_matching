@@ -436,8 +436,9 @@ export default function AdminPage() {
                     <Button
                       size="xs"
                       variant="outline"
+                      className="text-error-1 border-error-1 hover:bg-error-50 hover:text-error-1"
                       onClick={() => openSkipModal(group)}
-                      disabled={actionLoading}
+                      aria-disabled={actionLoading}
                     >
                       不在スキップ
                     </Button>
@@ -463,9 +464,9 @@ export default function AdminPage() {
             <Button
               size="md"
               variant="solid-fill"
-              className="w-full justify-center text-sm font-bold"
+              className="w-full justify-center text-sm font-bold min-h-touch"
               onClick={() => handleAdvance(match.id)}
-              disabled={actionLoading}
+              aria-disabled={actionLoading}
             >
               {actionLoading ? (
                 <span className="flex items-center justify-center gap-2">
@@ -506,7 +507,7 @@ export default function AdminPage() {
               size="sm"
               variant="outline"
               onClick={() => fetchStatus(true)}
-              disabled={actionLoading || isFetching}
+              aria-disabled={actionLoading || isFetching}
             >
               {isFetching ? <Spinner className="size-3.5 mr-1" /> : '🔄 '}
               手動更新
@@ -515,15 +516,16 @@ export default function AdminPage() {
               size="sm"
               variant="outline"
               onClick={handleAddSampleGroups}
-              disabled={actionLoading}
+              aria-disabled={actionLoading}
             >
               + テスト組投入
             </Button>
             <Button
               size="sm"
               variant="outline"
+              className="text-error-1 border-error-1 hover:bg-error-50 hover:text-error-1"
               onClick={openResetModal}
-              disabled={actionLoading}
+              aria-disabled={actionLoading}
             >
               全リセット
             </Button>
@@ -604,36 +606,28 @@ export default function AdminPage() {
 
                   {/* タブ切り替え ＆ CSVエクスポートボタン */}
                   <div className="flex items-center gap-2 flex-wrap">
-                    <div className="inline-flex rounded-6 border border-solid-gray-300 p-0.5 bg-solid-gray-100 text-xs">
-                      <button
-                        type="button"
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant={viewMode === 'active' ? 'solid-fill' : 'outline'}
                         onClick={() => setViewMode('active')}
-                        className={`px-3 py-1 rounded-4 font-bold transition-colors ${
-                          viewMode === 'active'
-                            ? 'bg-white text-solid-gray-900 shadow-sm'
-                            : 'text-solid-gray-600 hover:text-solid-gray-900'
-                        }`}
                       >
                         進行中のみ ({activeList.length})
-                      </button>
-                      <button
-                        type="button"
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant={viewMode === 'history' ? 'solid-fill' : 'outline'}
                         onClick={() => setViewMode('history')}
-                        className={`px-3 py-1 rounded-4 font-bold transition-colors ${
-                          viewMode === 'history'
-                            ? 'bg-white text-solid-gray-900 shadow-sm'
-                            : 'text-solid-gray-600 hover:text-solid-gray-900'
-                        }`}
                       >
                         全履歴 ({historyList.length})
-                      </button>
+                      </Button>
                     </div>
 
                     <Button
                       size="sm"
                       variant="outline"
                       onClick={handleExportCsv}
-                      disabled={!queueState || (historyList.length === 0 && activeList.length === 0)}
+                      aria-disabled={!queueState || (historyList.length === 0 && activeList.length === 0)}
                     >
                       📥 CSV出力
                     </Button>
@@ -646,21 +640,21 @@ export default function AdminPage() {
                     <span>エントリー状況を取得中...</span>
                   </div>
                 ) : displayGroups.length > 0 ? (
-                  <div className="overflow-x-auto">
+                  <div className="overflow-x-auto -mx-6 px-6">
                     <table className="w-full text-left border-collapse text-xs">
                       <thead>
-                        <tr className="border-b bg-solid-gray-100 text-solid-gray-800">
-                          <th className="py-2.5 px-3 font-bold">整理券</th>
-                          <th className="py-2.5 px-3 font-bold">チーム名</th>
-                          <th className="py-2.5 px-3 font-bold">代表者名</th>
-                          <th className="py-2.5 px-3 font-bold">人数</th>
-                          <th className="py-2.5 px-3 font-bold">希望形式</th>
-                          <th className="py-2.5 px-3 font-bold">現在状況</th>
-                          <th className="py-2.5 px-3 font-bold">受付時刻</th>
-                          <th className="py-2.5 px-3 font-bold text-right">操作</th>
+                        <tr className="border-b border-black bg-solid-gray-100 text-solid-gray-900">
+                          <th scope="col" className="py-3 px-4 font-bold text-start align-top">整理券</th>
+                          <th scope="col" className="py-3 px-4 font-bold text-start align-top">チーム名</th>
+                          <th scope="col" className="py-3 px-4 font-bold text-start align-top">代表者名</th>
+                          <th scope="col" className="py-3 px-4 font-bold text-start align-top">人数</th>
+                          <th scope="col" className="py-3 px-4 font-bold text-start align-top">希望形式</th>
+                          <th scope="col" className="py-3 px-4 font-bold text-start align-top">現在状況</th>
+                          <th scope="col" className="py-3 px-4 font-bold text-start align-top">受付時刻</th>
+                          <th scope="col" className="py-3 px-4 font-bold text-right align-top">操作</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-solid-gray-200">
+                      <tbody>
                         {displayGroups.map((group) => {
                           let statusLabel = '待機中';
                           let badgeVariant: StatusBadgeVariant = 'gray';
@@ -688,12 +682,12 @@ export default function AdminPage() {
                           }
 
                           return (
-                            <tr key={group.id} className="hover:bg-solid-gray-50 transition-colors">
-                              <td className="py-2.5 px-3 font-bold text-key-900">#{group.entry_number}</td>
-                              <td className="py-2.5 px-3 font-bold text-solid-gray-900">{group.team_name}</td>
-                              <td className="py-2.5 px-3 text-solid-gray-700">{group.leader_name}</td>
-                              <td className="py-2.5 px-3 font-bold">{group.headcount}名</td>
-                              <td className="py-2.5 px-3">
+                            <tr key={group.id} className="border-b border-solid-gray-300 hover:bg-solid-gray-50 transition-colors">
+                              <td className="py-3.5 px-4 font-bold text-key-900 align-middle">#{group.entry_number}</td>
+                              <td className="py-3.5 px-4 font-bold text-solid-gray-900 align-middle">{group.team_name}</td>
+                              <td className="py-3.5 px-4 text-solid-gray-700 align-middle">{group.leader_name}</td>
+                              <td className="py-3.5 px-4 font-bold align-middle">{group.headcount}名</td>
+                              <td className="py-3.5 px-4 align-middle">
                                 <StatusBadge
                                   variant={group.preference === 'closed' ? 'gray' : 'key'}
                                   size="sm"
@@ -701,21 +695,22 @@ export default function AdminPage() {
                                   {group.preference === 'closed' ? '貸切(8分)' : '合流(10分)'}
                                 </StatusBadge>
                               </td>
-                              <td className="py-2.5 px-3">
+                              <td className="py-3.5 px-4 align-middle">
                                 <StatusBadge variant={badgeVariant} size="sm">
                                   {statusLabel}
                                 </StatusBadge>
                               </td>
-                              <td className="py-2.5 px-3 text-solid-gray-600">
+                              <td className="py-3.5 px-4 text-solid-gray-600 align-middle">
                                 {new Date(group.created_at).toLocaleTimeString('ja-JP')}
                               </td>
-                              <td className="py-2.5 px-3 text-right">
+                              <td className="py-3.5 px-4 text-right align-middle">
                                 {group.status !== 'skipped' && group.status !== 'completed' && (
                                   <Button
                                     size="xs"
                                     variant="outline"
+                                    className="text-error-1 border-error-1 hover:bg-error-50 hover:text-error-1"
                                     onClick={() => openSkipModal(group)}
-                                    disabled={actionLoading}
+                                    aria-disabled={actionLoading}
                                   >
                                     不在スキップ
                                   </Button>
@@ -765,7 +760,7 @@ export default function AdminPage() {
               </div>
             </ModalDialogBody>
             <ModalDialogActions className="flex justify-end gap-2">
-              <Button size="sm" variant="outline" onClick={closeSkipModal} disabled={actionLoading}>
+              <Button size="sm" variant="outline" onClick={closeSkipModal} aria-disabled={actionLoading}>
                 キャンセル
               </Button>
               <Button
@@ -773,7 +768,7 @@ export default function AdminPage() {
                 variant="solid-fill"
                 className="min-w-32 font-bold"
                 onClick={handleConfirmSkip}
-                disabled={actionLoading}
+                aria-disabled={actionLoading}
               >
                 {actionLoading ? (
                   <span className="flex items-center justify-center gap-1.5">
@@ -807,15 +802,15 @@ export default function AdminPage() {
               </div>
             </ModalDialogBody>
             <ModalDialogActions className="flex justify-end gap-2">
-              <Button size="sm" variant="outline" onClick={closeResetModal} disabled={actionLoading}>
+              <Button size="sm" variant="outline" onClick={closeResetModal} aria-disabled={actionLoading}>
                 キャンセル
               </Button>
               <Button
                 size="sm"
                 variant="solid-fill"
-                className="min-w-32 font-bold bg-error-1 hover:bg-error-2"
+                className="min-w-32 font-bold !bg-error-1 hover:!bg-red-800"
                 onClick={handleConfirmReset}
-                disabled={actionLoading}
+                aria-disabled={actionLoading}
               >
                 {actionLoading ? (
                   <span className="flex items-center justify-center gap-1.5">
