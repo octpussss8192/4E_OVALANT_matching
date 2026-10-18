@@ -59,10 +59,12 @@ class SupabaseStorage:
             with httpx.Client(base_url=self.base_url, headers=self.headers, timeout=6.0) as client:
                 r_entries = client.get("/entries?select=*&order=entry_number.asc")
                 if r_entries.status_code != 200:
+                    print(f"[SupabaseStorage] Failed to get entries: {r_entries.status_code} {r_entries.text}")
                     return None
 
                 r_matches = client.get("/matches?select=*&order=match_number.asc")
                 if r_matches.status_code != 200:
+                    print(f"[SupabaseStorage] Failed to get matches: {r_matches.status_code} {r_matches.text}")
                     return None
 
                 r_links = client.get("/match_entries?select=*")

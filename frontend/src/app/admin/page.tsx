@@ -47,6 +47,7 @@ export default function AdminPage() {
   // 競合状態（Race Condition）防止用リクエストID
   const fetchRequestIdRef = useRef(0);
   const actionLoadingRef = useRef(false);
+  const isFetchingRef = useRef(false);
 
   // スキップ確認モーダル用状態
   const [skipTarget, setSkipTarget] = useState<EntryGroup | null>(null);
@@ -55,21 +56,39 @@ export default function AdminPage() {
   const fetchStatus = async (showIndicator = false) => {
     // 操作中は古いポーリングによる競合上書きを防ぐためスキップ
     if (!showIndicator && actionLoadingRef.current) return;
+    if (isFetchingRef.current && !showIndicator) return;
 
     const reqId = ++fetchRequestIdRef.current;
-    if (showIndicator) setIsFetching(true);
+    isFetchingRef.current = true;
+    setIsFetching(true);
+
     try {
       const data = await getQueueStatus();
       // 最新のリクエストレスポンスのみを反映（古いレスポンスによる上書き巻き戻しを完全防止）
       if (reqId === fetchRequestIdRef.current) {
-        setQueueState(data);
+        setQueueState((prevState) => {
+          // Stale-While-Revalidate: もし前回のデータが存在していて、新しく届いたデータが空（かつリセット操作中でない）場合、
+          // サーバーレスの一時的なコールドスタート空読みと判定して前回のデータを維持し、画面がまっさらに消えるのを防止
+          if (
+            prevState &&
+            (prevState.all_active_entries?.length ?? 0) > 0 &&
+            (data.all_active_entries?.length ?? 0) === 0 &&
+            !actionLoadingRef.current
+          ) {
+            console.warn('[Admin] Temporary empty state received from serverless, preserving previous state');
+            return prevState;
+          }
+          return data;
+        });
+
         const now = new Date();
         setLastUpdated(now.toLocaleTimeString('ja-JP'));
       }
     } catch (err) {
       console.error('Failed to fetch admin status:', err);
     } finally {
-      if (showIndicator && reqId === fetchRequestIdRef.current) {
+      if (reqId === fetchRequestIdRef.current) {
+        isFetchingRef.current = false;
         setIsFetching(false);
       }
     }
@@ -77,10 +96,29 @@ export default function AdminPage() {
 
   useEffect(() => {
     fetchStatus(true);
+
+    // 2秒間隔ポーリング（フォアグラウンド表示時のみ）
     const timer = setInterval(() => {
-      fetchStatus(false);
+      if (document.visibilityState === 'visible') {
+        fetchStatus(false);
+      }
     }, 2000);
-    return () => clearInterval(timer);
+
+    // 他のタブから戻ってきた瞬間に即座にスピナー付きで最新同期
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchStatus(true);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleVisibilityChange);
+
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleVisibilityChange);
+    };
   }, []);
 
   // 自動消去タイマー (フィードバックバナー)
@@ -211,7 +249,10 @@ export default function AdminPage() {
 
         <div>
           <div className="flex items-center justify-between border-b border-solid-gray-200 pb-2 mb-3">
-            <span className="font-bold text-sm text-solid-gray-800">{slotTitle}</span>
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-sm text-solid-gray-800">{slotTitle}</span>
+              {isFetching && <Spinner className="size-3.5 text-key-900" />}
+            </div>
             {match && (
               <span className="text-xs bg-key-50 text-key-900 border border-key-300 px-2 py-0.5 rounded-4 font-bold">
                 Match #{match.match_number} ({match.is_closed_match ? '貸切8分' : '通常10分'})
@@ -219,7 +260,12 @@ export default function AdminPage() {
             )}
           </div>
 
-          {match ? (
+          {!queueState ? (
+            <div className="py-10 flex flex-col items-center justify-center gap-2 text-xs text-solid-gray-500">
+              <Spinner className="size-5 text-key-900" />
+              <span>スロット状況を取得中...</span>
+            </div>
+          ) : match ? (
             <div className="space-y-3">
               <div className="space-y-2">
                 {match.assigned_groups.map((group) => (
@@ -381,6 +427,7 @@ export default function AdminPage() {
                   <Heading size="20" hasChip={true} className="font-bold text-solid-gray-900">
                     受付エントリー一覧 ({displayGroups.length}組)
                   </Heading>
+                  {isFetching && <Spinner className="size-4 text-key-900" />}
                   <span className="text-xs text-solid-gray-600">
                     (待機中: {queueState?.total_waiting_groups ?? 0}組 / {queueState?.total_waiting_players ?? 0}名)
                   </span>
