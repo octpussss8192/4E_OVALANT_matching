@@ -16,6 +16,7 @@ import {
   ModalDialogActions,
 } from '@/design-system';
 import { getQueueStatus, advanceMatch, skipEntry, resetSystem, addSampleGroups } from '@/lib/api';
+import { subscribeToMatchUpdates } from '@/lib/supabase';
 import type { QueueStatusResponse, Match, EntryGroup } from '@/types';
 
 // デジタル庁デザインシステム規格のスピナーアイコン (SVG)
@@ -97,12 +98,17 @@ export default function AdminPage() {
   useEffect(() => {
     fetchStatus(true);
 
-    // 2秒間隔ポーリング（フォアグラウンド表示時のみ）
+    // Supabase Realtime: データベースの更新 (entries / matches) を検知して即座に同期
+    const unsubscribe = subscribeToMatchUpdates(() => {
+      fetchStatus(true);
+    });
+
+    // バックグラウンド・セーフティネットポーリング (15秒)
     const timer = setInterval(() => {
       if (document.visibilityState === 'visible') {
         fetchStatus(false);
       }
-    }, 2000);
+    }, 15000);
 
     // 他のタブから戻ってきた瞬間に即座にスピナー付きで最新同期
     const handleVisibilityChange = () => {
@@ -115,6 +121,7 @@ export default function AdminPage() {
     window.addEventListener('focus', handleVisibilityChange);
 
     return () => {
+      unsubscribe();
       clearInterval(timer);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('focus', handleVisibilityChange);
@@ -336,7 +343,7 @@ export default function AdminPage() {
             <h1 className="text-xl font-bold tracking-wider">OVALANT 運営ダッシュボード (iPad)</h1>
             {/* デジタル庁公式 StatusBadge */}
             <StatusBadge className="text-xs py-1 px-2.5">
-              {isFetching ? '同期中...' : 'リアルタイム同期 (2s)'}
+              {isFetching ? '同期中...' : 'リアルタイム連携 (Supabase)'}
               {lastUpdated && <span className="text-solid-gray-200 ml-1">({lastUpdated})</span>}
             </StatusBadge>
           </div>
