@@ -47,6 +47,18 @@ class SupabaseStorage:
             "Prefer": "return=representation,resolution=merge-duplicates",
         }
         self.base_url = f"{self.url}/rest/v1"
+        self._client: Optional[httpx.Client] = None
+
+    def _get_client(self) -> httpx.Client:
+        """TCP/TLS コネクションを維持・再利用して Supabase 通信を数倍に高速化"""
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.Client(
+                base_url=self.base_url,
+                headers=self.headers,
+                timeout=5.0,
+                limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
+            )
+        return self._client
 
     def is_configured(self) -> bool:
         return bool(self.url and self.key)
@@ -56,105 +68,105 @@ class SupabaseStorage:
         if not self.is_configured():
             return None
         try:
-            with httpx.Client(base_url=self.base_url, headers=self.headers, timeout=6.0) as client:
-                r_entries = client.get("/entries?select=*&order=entry_number.asc")
-                if r_entries.status_code != 200:
-                    print(f"[SupabaseStorage] Failed to get entries: {r_entries.status_code} {r_entries.text}")
-                    return None
+            client = self._get_client()
+            r_entries = client.get("/entries?select=*&order=entry_number.asc")
+            if r_entries.status_code != 200:
+                print(f"[SupabaseStorage] Failed to get entries: {r_entries.status_code} {r_entries.text}")
+                return None
 
-                r_matches = client.get("/matches?select=*&order=match_number.asc")
-                if r_matches.status_code != 200:
-                    print(f"[SupabaseStorage] Failed to get matches: {r_matches.status_code} {r_matches.text}")
-                    return None
+            r_matches = client.get("/matches?select=*&order=match_number.asc")
+            if r_matches.status_code != 200:
+                print(f"[SupabaseStorage] Failed to get matches: {r_matches.status_code} {r_matches.text}")
+                return None
 
-                r_links = client.get("/match_entries?select=*")
-                raw_links = r_links.json() if r_links.status_code == 200 else []
+            r_links = client.get("/match_entries?select=*")
+            raw_links = r_links.json() if r_links.status_code == 200 else []
 
-                raw_entries = r_entries.json()
-                raw_matches = r_matches.json()
+            raw_entries = r_entries.json()
+            raw_matches = r_matches.json()
 
-                # EntryGroup オブジェクトに復元
-                entries: list[EntryGroup] = []
-                for e in raw_entries:
-                    try:
-                        entries.append(
-                            EntryGroup(
-                                id=str(e["id"]),
-                                entry_number=int(e["entry_number"]),
-                                session_id=str(e["session_id"]),
-                                leader_name=str(e["leader_name"]),
-                                team_name=str(e["team_name"]),
-                                headcount=int(e["headcount"]),
-                                preference=PreferenceType(e["preference"]),
-                                status=EntryStatus(e["status"]),
-                                assigned_match_id=str(e["assigned_match_id"]) if e.get("assigned_match_id") else None,
-                                skip_reason=e.get("skip_reason"),
-                                created_at=datetime.fromisoformat(e["created_at"]),
-                                updated_at=datetime.fromisoformat(e["updated_at"]),
-                            )
+            # EntryGroup オブジェクトに復元
+            entries: list[EntryGroup] = []
+            for e in raw_entries:
+                try:
+                    entries.append(
+                        EntryGroup(
+                            id=str(e["id"]),
+                            entry_number=int(e["entry_number"]),
+                            session_id=str(e["session_id"]),
+                            leader_name=str(e["leader_name"]),
+                            team_name=str(e["team_name"]),
+                            headcount=int(e["headcount"]),
+                            preference=PreferenceType(e["preference"]),
+                            status=EntryStatus(e["status"]),
+                            assigned_match_id=str(e["assigned_match_id"]) if e.get("assigned_match_id") else None,
+                            skip_reason=e.get("skip_reason"),
+                            created_at=datetime.fromisoformat(e["created_at"]),
+                            updated_at=datetime.fromisoformat(e["updated_at"]),
                         )
-                    except Exception as parse_err:
-                        print(f"[SupabaseStorage] Entry parse error: {parse_err}")
+                    )
+                except Exception as parse_err:
+                    print(f"[SupabaseStorage] Entry parse error: {parse_err}")
 
-                entries_by_id = {e.id: e for e in entries}
+            entries_by_id = {e.id: e for e in entries}
 
-                # Match オブジェクトに復元
-                matches: list[Match] = []
-                for m in raw_matches:
-                    try:
-                        m_id = str(m["id"])
-                        assigned_groups = [
-                            e for e in entries if e.assigned_match_id == m_id
-                        ]
+            # Match オブジェクトに復元
+            matches: list[Match] = []
+            for m in raw_matches:
+                try:
+                    m_id = str(m["id"])
+                    assigned_groups = [
+                        e for e in entries if e.assigned_match_id == m_id
+                    ]
 
-                        # チーム割り当ての復元
-                        m_links = [l for l in raw_links if str(l.get("match_id")) == m_id]
-                        red_group_ids = {str(l["entry_id"]) for l in m_links if l.get("team_side") == "red"}
-                        blue_group_ids = {str(l["entry_id"]) for l in m_links if l.get("team_side") == "blue"}
+                    # チーム割り当ての復元
+                    m_links = [l for l in raw_links if str(l.get("match_id")) == m_id]
+                    red_group_ids = {str(l["entry_id"]) for l in m_links if l.get("team_side") == "red"}
+                    blue_group_ids = {str(l["entry_id"]) for l in m_links if l.get("team_side") == "blue"}
 
-                        red_groups = [entries_by_id[gid] for gid in red_group_ids if gid in entries_by_id]
-                        blue_groups = [entries_by_id[gid] for gid in blue_group_ids if gid in entries_by_id]
+                    red_groups = [entries_by_id[gid] for gid in red_group_ids if gid in entries_by_id]
+                    blue_groups = [entries_by_id[gid] for gid in blue_group_ids if gid in entries_by_id]
 
-                        teams = MatchTeams(
-                            red=TeamSideAssignment(
-                                team_side=TeamSideType.RED,
-                                groups=red_groups,
-                                total_count=sum(g.headcount for g in red_groups),
-                            ),
-                            blue=TeamSideAssignment(
-                                team_side=TeamSideType.BLUE,
-                                groups=blue_groups,
-                                total_count=sum(g.headcount for g in blue_groups),
-                            ),
+                    teams = MatchTeams(
+                        red=TeamSideAssignment(
+                            team_side=TeamSideType.RED,
+                            groups=red_groups,
+                            total_count=sum(g.headcount for g in red_groups),
+                        ),
+                        blue=TeamSideAssignment(
+                            team_side=TeamSideType.BLUE,
+                            groups=blue_groups,
+                            total_count=sum(g.headcount for g in blue_groups),
+                        ),
+                    )
+
+                    matches.append(
+                        Match(
+                            id=m_id,
+                            match_number=int(m["match_number"]),
+                            status=MatchStatus(m["status"]),
+                            is_closed_match=bool(m["is_closed_match"]),
+                            duration_minutes=int(m["duration_minutes"]),
+                            assigned_groups=assigned_groups,
+                            total_players=int(m["total_players"]),
+                            teams=teams,
+                            started_at=datetime.fromisoformat(m["started_at"]) if m.get("started_at") else None,
+                            ended_at=datetime.fromisoformat(m["ended_at"]) if m.get("ended_at") else None,
+                            created_at=datetime.fromisoformat(m["created_at"]),
                         )
+                    )
+                except Exception as parse_err:
+                    print(f"[SupabaseStorage] Match parse error: {parse_err}")
 
-                        matches.append(
-                            Match(
-                                id=m_id,
-                                match_number=int(m["match_number"]),
-                                status=MatchStatus(m["status"]),
-                                is_closed_match=bool(m["is_closed_match"]),
-                                duration_minutes=int(m["duration_minutes"]),
-                                assigned_groups=assigned_groups,
-                                total_players=int(m["total_players"]),
-                                teams=teams,
-                                started_at=datetime.fromisoformat(m["started_at"]) if m.get("started_at") else None,
-                                ended_at=datetime.fromisoformat(m["ended_at"]) if m.get("ended_at") else None,
-                                created_at=datetime.fromisoformat(m["created_at"]),
-                            )
-                        )
-                    except Exception as parse_err:
-                        print(f"[SupabaseStorage] Match parse error: {parse_err}")
+            next_entry_num = max([e.entry_number for e in entries], default=100) + 1
+            next_match_num = max([m.match_number for m in matches], default=0) + 1
 
-                next_entry_num = max([e.entry_number for e in entries], default=100) + 1
-                next_match_num = max([m.match_number for m in matches], default=0) + 1
-
-                return {
-                    "entries": entries,
-                    "matches": matches,
-                    "next_entry_number": next_entry_num,
-                    "next_match_number": next_match_num,
-                }
+            return {
+                "entries": entries,
+                "matches": matches,
+                "next_entry_number": next_entry_num,
+                "next_match_number": next_match_num,
+            }
         except Exception as e:
             print(f"[SupabaseStorage] load_state exception: {e}")
             return None
@@ -213,17 +225,17 @@ class SupabaseStorage:
                             "team_side": "blue",
                         })
 
-            with httpx.Client(base_url=self.base_url, headers=self.headers, timeout=6.0) as client:
-                if matches_payload:
-                    client.post("/matches?on_conflict=id", json=matches_payload)
+            client = self._get_client()
+            if matches_payload:
+                client.post("/matches?on_conflict=id", json=matches_payload)
 
-                if entries_payload:
-                    client.post("/entries?on_conflict=id", json=entries_payload)
+            if entries_payload:
+                client.post("/entries?on_conflict=id", json=entries_payload)
 
-                if links_payload:
-                    client.post("/match_entries?on_conflict=match_id,entry_id", json=links_payload)
+            if links_payload:
+                client.post("/match_entries?on_conflict=match_id,entry_id", json=links_payload)
 
-                return True
+            return True
         except Exception as e:
             print(f"[SupabaseStorage] save_state exception: {e}")
             return False
@@ -233,11 +245,11 @@ class SupabaseStorage:
         if not self.is_configured():
             return True
         try:
-            with httpx.Client(base_url=self.base_url, headers=self.headers, timeout=6.0) as client:
-                client.delete("/match_entries?match_id=neq.00000000-0000-0000-0000-000000000000")
-                client.delete("/entries?id=neq.00000000-0000-0000-0000-000000000000")
-                client.delete("/matches?id=neq.00000000-0000-0000-0000-000000000000")
-                return True
+            client = self._get_client()
+            client.delete("/match_entries?match_id=neq.00000000-0000-0000-0000-000000000000")
+            client.delete("/entries?id=neq.00000000-0000-0000-0000-000000000000")
+            client.delete("/matches?id=neq.00000000-0000-0000-0000-000000000000")
+            return True
         except Exception as e:
             print(f"[SupabaseStorage] reset_all exception: {e}")
             return False

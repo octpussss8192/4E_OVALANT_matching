@@ -75,21 +75,7 @@ export default function AdminPage() {
       const data = await getQueueStatus();
       // 最新のリクエストレスポンスのみを反映（古いレスポンスによる上書き巻き戻しを完全防止）
       if (reqId === fetchRequestIdRef.current) {
-        setQueueState((prevState) => {
-          // Stale-While-Revalidate: もし前回のデータが存在していて、新しく届いたデータが空（かつリセット操作中でない）場合、
-          // サーバーレスの一時的なコールドスタート空読みと判定して前回のデータを維持し、画面がまっさらに消えるのを防止
-          if (
-            prevState &&
-            (prevState.all_active_entries?.length ?? 0) > 0 &&
-            (data.all_active_entries?.length ?? 0) === 0 &&
-            !actionLoadingRef.current
-          ) {
-            console.warn('[Admin] Temporary empty state received from serverless, preserving previous state');
-            return prevState;
-          }
-          return data;
-        });
-
+        setQueueState(data);
         const now = new Date();
         setLastUpdated(now.toLocaleTimeString('ja-JP'));
       }
@@ -111,12 +97,12 @@ export default function AdminPage() {
       fetchStatus(true);
     });
 
-    // バックグラウンド・セーフティネットポーリング (15秒)
+    // バックグラウンド・セーフティネットポーリング (3秒間隔で高速同期)
     const timer = setInterval(() => {
       if (document.visibilityState === 'visible') {
         fetchStatus(false);
       }
-    }, 15000);
+    }, 3000);
 
     // 他のタブから戻ってきた瞬間に即座にスピナー付きで最新同期
     const handleVisibilityChange = () => {
@@ -255,6 +241,19 @@ export default function AdminPage() {
     setActionLoadingText('全データをリセット中...');
     try {
       await resetSystem();
+      setQueueState({
+        current_match: null,
+        next_match: null,
+        next_next_match: null,
+        waiting_groups: [],
+        all_active_entries: [],
+        total_waiting_groups: 0,
+        total_waiting_players: 0,
+        suggestion_tip: {
+          recommended_party_size: null,
+          message: '現在待機グループはいません',
+        },
+      });
       setActionFeedback({
         type: 'warning',
         title: 'システム初期化',
