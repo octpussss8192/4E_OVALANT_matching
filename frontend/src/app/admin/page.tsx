@@ -223,13 +223,12 @@ export default function AdminPage() {
     match: Match | null,
     slotTitle: string,
     actionButtonText: string,
-    actionColorClass: string
   ) => {
     return (
       <Card className="relative flex flex-col justify-between bg-white shadow-sm border border-solid-gray-300 min-h-[220px]">
         {/* 操作中オーバーレイ */}
         {actionLoading && (
-          <div className="absolute inset-0 bg-white/75 backdrop-blur-[0.5px] rounded-12 flex flex-col items-center justify-center z-10 gap-2 text-xs font-bold text-solid-gray-800 transition-opacity">
+          <div className="absolute inset-0 bg-white/75 backdrop-blur-[0.5px] rounded-12 flex flex-col items-center justify-center z-10 gap-2 text-xs font-bold text-solid-gray-800">
             <Spinner className="size-6 text-key-900" />
             <span>{actionLoadingText || '更新中...'}</span>
           </div>
@@ -262,7 +261,6 @@ export default function AdminPage() {
                     <Button
                       size="xs"
                       variant="outline"
-                      className="border-red-600 text-red-600 hover:bg-red-50"
                       onClick={() => openSkipModal(group)}
                       disabled={actionLoading}
                     >
@@ -290,7 +288,7 @@ export default function AdminPage() {
             <Button
               size="md"
               variant="solid-fill"
-              className={`w-full justify-center text-sm font-bold ${actionColorClass}`}
+              className="w-full justify-center text-sm font-bold"
               onClick={() => handleAdvance(match.id)}
               disabled={actionLoading}
             >
@@ -310,40 +308,34 @@ export default function AdminPage() {
 
   return (
     <main className="min-h-screen bg-solid-gray-100 p-6 flex flex-col">
-      {/* スタッフ管理ヘッダー */}
+      {/* スタッフ管理ヘッダー (デジタル庁デザインシステム仕様) */}
       <header className="flex flex-col md:flex-row md:items-center justify-between bg-solid-gray-900 text-white px-6 py-4 rounded-12 shadow mb-4 gap-4">
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-xl font-bold tracking-wider">OVALANT 運営ダッシュボード (iPad)</h1>
-            {/* リアルタイム同期インジケーター */}
-            <div className="flex items-center gap-1.5 bg-solid-gray-800 border border-solid-gray-700 px-2.5 py-1 rounded-full text-[11px]">
-              <span className={`inline-block size-2 rounded-full ${isFetching ? 'bg-amber-400 animate-ping' : 'bg-emerald-400'}`} />
-              <span className="text-solid-gray-300">
-                {isFetching ? '同期中...' : 'リアルタイム同期 (2s)'}
-              </span>
-              {lastUpdated && (
-                <span className="text-solid-gray-400 ml-1">({lastUpdated})</span>
-              )}
-            </div>
+            {/* デジタル庁公式 StatusBadge */}
+            <StatusBadge className="bg-solid-gray-800 border border-solid-gray-700 text-xs py-1 px-2.5">
+              <span className={`inline-block size-2 rounded-full ${isFetching ? 'bg-amber-400' : 'bg-emerald-400'} mr-1.5 align-middle`} />
+              {isFetching ? '同期中...' : 'リアルタイム同期 (2s)'}
+              {lastUpdated && <span className="text-solid-gray-400 ml-1">({lastUpdated})</span>}
+            </StatusBadge>
           </div>
           <p className="text-xs text-solid-gray-400 mt-0.5">受付呼出・試合進行・不在スキップ管理</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          {/* 手動リフレッシュボタン */}
+          {/* デジタル庁公式 Button コンポーネント群 */}
           <Button
             size="sm"
             variant="outline"
-            className="text-xs bg-solid-gray-800 text-white border-solid-gray-600 hover:bg-solid-gray-700"
             onClick={() => fetchStatus(true)}
             disabled={actionLoading || isFetching}
           >
-            <span className={isFetching ? 'animate-spin inline-block mr-1' : 'inline-block mr-1'}>🔄</span>
+            {isFetching ? <Spinner className="size-3.5 mr-1" /> : '🔄 '}
             手動更新
           </Button>
           <Button
             size="sm"
             variant="outline"
-            className="text-xs bg-white text-solid-gray-900"
             onClick={handleAddSampleGroups}
             disabled={actionLoading}
           >
@@ -352,32 +344,22 @@ export default function AdminPage() {
           <Button
             size="sm"
             variant="outline"
-            className="text-xs border-red-500 text-red-400 hover:bg-red-950"
             onClick={handleReset}
             disabled={actionLoading}
           >
             全リセット
           </Button>
-          <a
-            href="/monitor"
-            target="_blank"
-            className="text-xs bg-key-700 hover:bg-key-800 text-white font-bold px-3 py-2 rounded-6 inline-flex items-center"
+          <Button
+            asChild
+            size="sm"
+            variant="solid-fill"
           >
-            会場モニタ別窓 ↗
-          </a>
+            <a href="/monitor" target="_blank" rel="noreferrer">
+              会場モニタ別窓 ↗
+            </a>
+          </Button>
         </div>
       </header>
-
-      {/* アクション実行中の通知バー */}
-      {actionLoading && (
-        <div className="mb-4 bg-blue-50 border border-blue-200 text-blue-900 px-4 py-2.5 rounded-8 flex items-center justify-between text-xs font-bold shadow-sm animate-pulse">
-          <div className="flex items-center gap-2">
-            <span className="animate-spin inline-block text-base">⏳</span>
-            <span>{actionLoadingText || 'サーバーと同期中... しばらくお待ちください'}</span>
-          </div>
-          <span className="text-[11px] text-blue-700 font-normal">自動的に画面へ反映されます</span>
-        </div>
-      )}
 
       {/* 操作完了フィードバック通知（デジタル庁公式 NotificationBanner） */}
       {actionFeedback && (
@@ -398,19 +380,16 @@ export default function AdminPage() {
           queueState?.current_match ?? null,
           '1. 現在対戦中',
           '試合終了 (スロットを空けて繰り上げ)',
-          'bg-emerald-700 hover:bg-emerald-800'
         )}
         {renderSlotManagement(
           queueState?.next_match ?? null,
           '2. 次の試合',
           '案内完了 (対戦中へ昇格)',
-          'bg-key-900 hover:bg-key-1000'
         )}
         {renderSlotManagement(
           queueState?.next_next_match ?? null,
           '3. その次の試合',
           '呼出開始 (Nextへ昇格)',
-          'bg-amber-700 hover:bg-amber-800'
         )}
       </div>
 
