@@ -85,6 +85,9 @@ def get_queue_status():
     ]
     all_active_entries.sort(key=lambda x: x.entry_number)
 
+    # 過去完了分(COMPLETED)も含めた全エントリー履歴
+    all_history_entries = sorted(engine.entries, key=lambda x: x.entry_number)
+
     return QueueStatusResponse(
         current_match=current_match,
         next_match=next_match,
@@ -94,6 +97,7 @@ def get_queue_status():
         total_waiting_players=total_waiting_players,
         waiting_groups=waiting_groups,
         all_active_entries=all_active_entries,
+        all_history_entries=all_history_entries,
     )
 
 

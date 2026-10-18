@@ -140,7 +140,21 @@ export default function MonitorPage() {
           </div>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-solid-gray-500 py-12">
-            <span className="text-3xl mb-2 text-solid-gray-400" aria-hidden="true">⏳</span>
+            <svg
+              className="size-8 mb-2.5 text-solid-gray-400"
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              strokeWidth="1.5"
+              stroke="currentColor"
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
+              />
+            </svg>
             <p className="text-sm font-medium">現在マッチング待機中</p>
           </div>
         )}

@@ -47,6 +47,8 @@ export default function AdminPage() {
     message: string;
     type: 'info1' | 'success' | 'warning' | 'error';
   } | null>(null);
+  // 表示モード ('active': 進行中のみ, 'history': 完了・スキップ含む全履歴)
+  const [viewMode, setViewMode] = useState<'active' | 'history'>('active');
   const [isFetching, setIsFetching] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string>('');
 
@@ -61,6 +63,62 @@ export default function AdminPage() {
 
   // 全リセット確認モーダル用状態
   const resetDialogRef = useRef<HTMLDialogElement>(null);
+
+  // CSVエクスポート処理 (UTF-8 BOM付き)
+  const handleExportCsv = () => {
+    const list = queueState?.all_history_entries && queueState.all_history_entries.length > 0
+      ? queueState.all_history_entries
+      : (queueState?.all_active_entries ?? []);
+
+    if (list.length === 0) {
+      setActionFeedback({
+        type: 'warning',
+        title: 'エクスポート不可',
+        message: '出力対象のエントリー履歴がありません。',
+      });
+      return;
+    }
+
+    const headers = ['整理券番号', 'チーム名', '代表者名', '人数', '希望形式', '最終ステータス', '受付時刻', '割当試合ID', 'スキップ理由'];
+    const rows = list.map((g) => {
+      let statusStr = '待機中';
+      if (g.status === 'in_match') statusStr = '対戦中';
+      else if (g.status === 'called') statusStr = '呼出中';
+      else if (g.status === 'completed') statusStr = '対戦完了';
+      else if (g.status === 'skipped') statusStr = '不在スキップ';
+
+      return [
+        g.entry_number,
+        `"${g.team_name.replace(/"/g, '""')}"`,
+        `"${g.leader_name.replace(/"/g, '""')}"`,
+        g.headcount,
+        g.preference === 'closed' ? '貸切(8分)' : '合流(10分)',
+        statusStr,
+        `"${new Date(g.created_at).toLocaleString('ja-JP')}"`,
+        g.assigned_match_id || '',
+        `"${(g.skip_reason || '').replace(/"/g, '""')}"`,
+      ];
+    });
+
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const now = new Date();
+    const timestamp = now.toISOString().replace(/[-:T]/g, '').slice(0, 14);
+    a.download = `ovalant_entries_history_${timestamp}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    setActionFeedback({
+      type: 'success',
+      title: 'CSVエクスポート完了',
+      message: `全 ${list.length} 件のエントリー履歴をCSV出力しました。`,
+    });
+  };
 
   const fetchStatus = async (showIndicator = false) => {
     // 操作中は古いポーリングによる競合上書きを防ぐためスキップ
@@ -92,19 +150,12 @@ export default function AdminPage() {
   useEffect(() => {
     fetchStatus(true);
 
-    // Supabase Realtime: データベースの更新 (entries / matches) を検知して即座に同期
+    // Supabase Realtime: データベースの更新 (entries / matches) を検知して即座に同期（タイマー不要で0秒反映）
     const unsubscribe = subscribeToMatchUpdates(() => {
       fetchStatus(true);
     });
 
-    // バックグラウンド・セーフティネットポーリング (3秒間隔で高速同期)
-    const timer = setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        fetchStatus(false);
-      }
-    }, 3000);
-
-    // 他のタブから戻ってきた瞬間に即座にスピナー付きで最新同期
+    // 画面アクティブ時同期: 他のタブやスリープから戻ってきた瞬間に即座に最新同期
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         fetchStatus(true);
@@ -116,7 +167,6 @@ export default function AdminPage() {
 
     return () => {
       unsubscribe();
-      clearInterval(timer);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('focus', handleVisibilityChange);
     };
@@ -464,31 +514,71 @@ export default function AdminPage() {
         {/* 下段: 受付グループ一覧テーブル */}
         <Card className="p-6">
           {(() => {
-            const displayGroups = (queueState?.all_active_entries && queueState.all_active_entries.length > 0)
+            const activeList = (queueState?.all_active_entries && queueState.all_active_entries.length > 0)
               ? queueState.all_active_entries
               : (queueState?.waiting_groups ?? []);
 
+            const historyList = (queueState?.all_history_entries && queueState.all_history_entries.length > 0)
+              ? queueState.all_history_entries
+              : activeList;
+
+            const displayGroups = viewMode === 'active' ? activeList : historyList;
+
             return (
               <>
-                <div className="flex items-center justify-between border-b border-solid-gray-200 pb-3 mb-4 flex-wrap gap-2">
+                <div className="flex items-center justify-between border-b border-solid-gray-200 pb-3 mb-4 flex-wrap gap-3">
                   <div className="flex items-center gap-3">
                     <Heading size="20" hasChip={true} className="font-bold text-solid-gray-900">
-                      受付エントリー一覧 ({displayGroups.length}組)
+                      {viewMode === 'active' ? '進行中エントリー' : '全エントリー履歴'} ({displayGroups.length}組)
                     </Heading>
                     {isFetching && <Spinner className="size-4 text-key-900" />}
                     <span className="text-xs text-solid-gray-600">
                       (待機中: {queueState?.total_waiting_groups ?? 0}組 / {queueState?.total_waiting_players ?? 0}名)
                     </span>
                   </div>
-                  <span className="text-xs text-solid-gray-600">
-                    💡 サジェスト: {queueState?.suggestion_tip.message}
-                  </span>
+
+                  {/* タブ切り替え ＆ CSVエクスポートボタン */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <div className="inline-flex rounded-6 border border-solid-gray-300 p-0.5 bg-solid-gray-100 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setViewMode('active')}
+                        className={`px-3 py-1 rounded-4 font-bold transition-colors ${
+                          viewMode === 'active'
+                            ? 'bg-white text-solid-gray-900 shadow-sm'
+                            : 'text-solid-gray-600 hover:text-solid-gray-900'
+                        }`}
+                      >
+                        進行中のみ ({activeList.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setViewMode('history')}
+                        className={`px-3 py-1 rounded-4 font-bold transition-colors ${
+                          viewMode === 'history'
+                            ? 'bg-white text-solid-gray-900 shadow-sm'
+                            : 'text-solid-gray-600 hover:text-solid-gray-900'
+                        }`}
+                      >
+                        全履歴 ({historyList.length})
+                      </button>
+                    </div>
+
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleExportCsv}
+                      disabled={displayGroups.length === 0}
+                    >
+                      📥 CSV出力
+                    </Button>
+                  </div>
                 </div>
 
                 {!queueState ? (
                   <div className="py-12 flex flex-col items-center justify-center gap-2 text-xs text-solid-gray-500">
                     <Spinner className="size-5 text-key-900" />
-                    <span>待機キューの状況を取得中...</span>
+                    <span>エントリー状況を取得中...</span>
                   </div>
                 ) : displayGroups.length > 0 ? (
                   <div className="overflow-x-auto">
@@ -524,6 +614,9 @@ export default function AdminPage() {
                               statusLabel = '枠割当済';
                               badgeVariant = 'gray';
                             }
+                          } else if (group.status === 'completed') {
+                            statusLabel = '対戦完了';
+                            badgeVariant = 'success';
                           } else if (group.status === 'skipped') {
                             statusLabel = '不在スキップ';
                             badgeVariant = 'error';
@@ -552,7 +645,7 @@ export default function AdminPage() {
                                 {new Date(group.created_at).toLocaleTimeString('ja-JP')}
                               </td>
                               <td className="py-2.5 px-3 text-right">
-                                {group.status !== 'skipped' && (
+                                {group.status !== 'skipped' && group.status !== 'completed' && (
                                   <Button
                                     size="xs"
                                     variant="outline"
@@ -571,7 +664,9 @@ export default function AdminPage() {
                   </div>
                 ) : (
                   <div className="py-12 text-center text-xs text-solid-gray-500">
-                    現在、エントリー中のグループはありません。
+                    {viewMode === 'active'
+                      ? '現在、進行中・待機中のグループはありません。'
+                      : '過去のエントリー履歴はありません。'}
                   </div>
                 )}
               </>
