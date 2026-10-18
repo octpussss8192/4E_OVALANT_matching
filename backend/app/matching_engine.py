@@ -246,7 +246,7 @@ class MatchingEngine:
                         blue_count = sum(g.headcount for g in remaining_blue)
 
                         # 残ったメンバーで試合が成立できるか判定:
-                        # (3v3, 3v2, 2v3, 2v2) のいずれかを満たせば、スロットを維持したまま試合続行！
+                        # (3v3, 3v2, 2v3, 2v2) のいずれかを満たせば試合可能
                         is_valid_match = (
                             (red_count == 3 and blue_count == 3)
                             or (red_count == 3 and blue_count == 2)
@@ -254,8 +254,14 @@ class MatchingEngine:
                             or (red_count == 2 and blue_count == 2)
                         )
 
-                        if is_valid_match:
-                            # 試合スロットを維持したままチーム構成を即時更新（相方は後ろに回されない！）
+                        # スロット1 (IN_PROGRESS: 現在対戦中) および スロット2 (CALLING: 次の試合) では、
+                        # 既に呼び出し・入場・対戦中のため、再マッチングは行わずスロットを維持して進行する。
+                        # スロット3 (SCHEDULED: その次の試合) では、呼び出し前のため再マッチングを行い、
+                        # 待機列から別のグループを補充・再編成する。
+                        is_active_slot = match.status in (MatchStatus.CALLING, MatchStatus.IN_PROGRESS)
+
+                        if is_valid_match and is_active_slot:
+                            # 1.対戦中 / 2.次の試合: スロットを維持したままチーム構成を即時更新（相方は後ろに回されない）
                             match.assigned_groups = remaining_assigned
                             match.total_players = red_count + blue_count
                             match.teams = MatchTeams(
@@ -263,8 +269,8 @@ class MatchingEngine:
                                 blue=TeamSideAssignment(team_side=TeamSideType.BLUE, groups=remaining_blue, total_count=blue_count),
                             )
                         else:
-                            # 人数バランスが崩れて試合が成立しない場合のみマッチをキャンセルし、
-                            # 残されたグループを待機キュー最優先（元のcreated_at保持）に戻す
+                            # 3.その次の試合 (SCHEDULED) または 人数バランスが崩れて不成立の場合:
+                            # マッチを解散し、残されたグループを待機キュー最優先（元の created_at を保持）に戻して再マッチングを行う
                             match.status = MatchStatus.CANCELLED
                             for partner in remaining_assigned:
                                 ent = self._get_entry(partner.id)
