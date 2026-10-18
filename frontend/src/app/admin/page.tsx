@@ -290,17 +290,16 @@ export default function AdminPage() {
         )}
 
         <div>
-          <div className="flex items-center justify-between border-b border-solid-gray-200 pb-3 mb-3">
-            <div className="flex items-center gap-2">
-              <Heading size="18" hasChip={true} className="font-bold text-solid-gray-900">
-                {slotTitle}
-              </Heading>
+          <div className="flex items-center justify-between pb-3 mb-3 border-b border-solid-gray-200">
+            <div className="flex items-center gap-2.5">
+              <span className="w-1.5 h-5 bg-key-900 rounded-full inline-block shrink-0" aria-hidden="true" />
+              <h2 className="text-base font-bold text-solid-gray-900 tracking-tight">{slotTitle}</h2>
               {isFetching && <Spinner className="size-3.5 text-key-900" />}
             </div>
             {match && (
-              <StatusBadge variant={match.is_closed_match ? 'gray' : 'key'} size="sm">
-                Match #{match.match_number} ({match.is_closed_match ? '貸切 8分' : '合流 10分'})
-              </StatusBadge>
+              <span className="text-xs bg-solid-gray-100 text-solid-gray-800 px-2 py-0.5 rounded-4 border border-solid-gray-300 font-semibold">
+                第 {match.match_number} 試合 ({match.is_closed_match ? '貸切 8分' : '合流 10分'})
+              </span>
             )}
           </div>
 
@@ -310,18 +309,20 @@ export default function AdminPage() {
               <span>スロット状況を取得中...</span>
             </div>
           ) : match ? (
-            <div className="space-y-3">
-              <div className="space-y-2">
+            <div>
+              <ul className="divide-y divide-solid-gray-200">
                 {match.assigned_groups.map((group) => (
-                  <div
+                  <li
                     key={group.id}
-                    className="flex items-center justify-between p-3 bg-solid-gray-50 rounded-6 border border-solid-gray-200 text-xs"
+                    className="flex items-center justify-between py-2.5 text-xs"
                   >
                     <div>
-                      <span className="font-bold text-base text-key-900 mr-2">#{group.entry_number}</span>
-                      <span className="font-bold text-solid-gray-900">{group.team_name}</span>
-                      <span className="text-solid-gray-600 ml-1">({group.headcount}名)</span>
-                      <div className="text-[11px] text-solid-gray-600">代表: {group.leader_name}</div>
+                      <div>
+                        <span className="font-bold text-sm text-solid-gray-900 mr-2">#{group.entry_number}</span>
+                        <span className="font-bold text-solid-gray-900">{group.team_name}</span>
+                        <span className="text-solid-gray-600 ml-1">({group.headcount}名)</span>
+                      </div>
+                      <div className="text-[11px] text-solid-gray-500 mt-0.5">代表: {group.leader_name}</div>
                     </div>
                     <Button
                       size="xs"
@@ -331,9 +332,9 @@ export default function AdminPage() {
                     >
                       不在スキップ
                     </Button>
-                  </div>
+                  </li>
                 ))}
-              </div>
+              </ul>
             </div>
           ) : (
             <div className="py-10 text-center text-xs text-solid-gray-500">
