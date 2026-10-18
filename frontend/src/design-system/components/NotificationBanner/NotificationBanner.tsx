@@ -23,8 +23,7 @@ export const NotificationBanner = (props: Props) => {
   return (
     <div
       className={`
-        grid grid-cols-[var(--icon-size)_1fr_minmax(0,auto)] grid-rows-[minmax(calc(36/16*1rem),auto)] border-current px-4 pt-2 pb-6 [--icon-size:calc(24/16*1rem)] gap-4
-        desktop:gap-x-6 desktop:px-6 desktop:pt-6 desktop:pb-8 desktop:[--icon-size:calc(36/16*1rem)]
+        border-current p-4 rounded-12 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 bg-white
         ${bannerStyleClasses}
         ${bannerTypeClasses}
         ${className ?? ''}
@@ -32,16 +31,20 @@ export const NotificationBanner = (props: Props) => {
       data-type={type}
       data-style={bannerStyle}
     >
-      <Tag className={`col-span-2 grid grid-cols-[inherit] gap-[inherit]`}>
+      <Tag className="flex items-center gap-2.5 shrink-0">
         <NotificationBannerIcon
-          className='justify-self-center mt-[calc(3/16*1rem)] size-7 max-w-none max-h-none desktop:size-11 desktop:-my-1'
+          className="size-6 shrink-0 desktop:size-7"
           type={type}
         />
-        <span className='pt-[calc(3/16*1rem)] text-std-17B-170 text-solid-gray-900 desktop:text-std-20B-150 desktop:pt-0.5'>
+        <span className="font-bold text-base desktop:text-lg text-solid-gray-900 whitespace-nowrap">
           {title}
         </span>
       </Tag>
-      {children}
+      {children && (
+        <div className="text-sm desktop:text-base text-solid-gray-800 flex-1 min-w-0">
+          {children}
+        </div>
+      )}
     </div>
   );
 };
