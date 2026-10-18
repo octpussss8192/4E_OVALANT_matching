@@ -226,11 +226,23 @@ export default function AdminPage() {
     setActionLoadingText(`不在スキップ処理中 (#${skipTarget.entry_number} ${skipTarget.team_name})...`);
     try {
       await skipEntry(skipTarget.id, '受付呼出時不在のため運営がスキップ');
+      const targetId = skipTarget.id;
+      setQueueState((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          all_active_entries: (prev.all_active_entries || []).filter((g) => g.id !== targetId),
+          waiting_groups: (prev.waiting_groups || []).filter((g) => g.id !== targetId),
+          all_history_entries: (prev.all_history_entries || []).map((g) =>
+            g.id === targetId ? { ...g, status: 'skipped' as const } : g
+          ),
+        };
+      });
       closeSkipModal();
       setActionFeedback({
         type: 'info1',
         title: '不在スキップを実行しました',
-        message: `#${skipTarget.entry_number}「${skipTarget.team_name}」をスキップしました。相方グループは待機キュー最優先に戻りました。`,
+        message: `#${skipTarget.entry_number}「${skipTarget.team_name}」を進行中キューから除外しました。相方グループは待機キュー最優先に戻りました。`,
       });
       await fetchStatus(true);
     } catch (err: any) {
@@ -514,13 +526,18 @@ export default function AdminPage() {
         {/* 下段: 受付グループ一覧テーブル */}
         <Card className="p-6">
           {(() => {
-            const activeList = (queueState?.all_active_entries && queueState.all_active_entries.length > 0)
+            const rawActive = (queueState?.all_active_entries && queueState.all_active_entries.length > 0)
               ? queueState.all_active_entries
               : (queueState?.waiting_groups ?? []);
 
+            // 進行中エントリーからは不在スキップ・対戦完了のグループを完全に除外
+            const activeList = rawActive.filter(
+              (g) => g.status !== 'skipped' && g.status !== 'completed'
+            );
+
             const historyList = (queueState?.all_history_entries && queueState.all_history_entries.length > 0)
               ? queueState.all_history_entries
-              : activeList;
+              : (queueState?.all_active_entries ?? []);
 
             const displayGroups = viewMode === 'active' ? activeList : historyList;
 

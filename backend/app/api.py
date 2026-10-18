@@ -78,10 +78,10 @@ def get_queue_status():
     total_waiting_players = sum(e.headcount for e in waiting_groups)
     tip = engine.calculate_suggestion_tip()
 
-    # 管理ダッシュボード用: 全有効エントリー（対戦中・呼出中・待機中・不在スキップ等）
+    # 管理ダッシュボード用: 進行中の全有効エントリー（対戦中・呼出中・待機中）※スキップ済・完了済は進行中から除外
     all_active_entries = [
         e for e in engine.entries
-        if e.status in (EntryStatus.WAITING, EntryStatus.CALLED, EntryStatus.IN_MATCH, EntryStatus.SKIPPED)
+        if e.status in (EntryStatus.WAITING, EntryStatus.CALLED, EntryStatus.IN_MATCH)
     ]
     all_active_entries.sort(key=lambda x: x.entry_number)
 
