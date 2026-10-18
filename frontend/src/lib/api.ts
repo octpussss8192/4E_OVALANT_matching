@@ -86,3 +86,16 @@ export async function resetSystem(): Promise<void> {
   const apiBase = getApiBase();
   await fetch(`${apiBase}/admin/reset`, { method: 'POST' });
 }
+
+export async function addSampleGroups(): Promise<QueueStatusResponse> {
+  const apiBase = getApiBase();
+  const res = await fetch(`${apiBase}/admin/sample-data`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({ detail: 'テストデータ投入に失敗しました' }));
+    throw new Error(errorData.detail || 'テストデータ投入に失敗しました');
+  }
+  return res.json();
+}
+

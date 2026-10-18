@@ -15,7 +15,7 @@ import {
   ModalDialogBody,
   ModalDialogActions,
 } from '@/design-system';
-import { getQueueStatus, advanceMatch, skipEntry, resetSystem, createEntry } from '@/lib/api';
+import { getQueueStatus, advanceMatch, skipEntry, resetSystem, addSampleGroups } from '@/lib/api';
 import type { QueueStatusResponse, Match, EntryGroup } from '@/types';
 
 // デジタル庁デザインシステム規格のスピナーアイコン (SVG)
@@ -149,46 +149,21 @@ export default function AdminPage() {
     }
   };
 
-  // デバッグ用: サンプルグループの自動投入
+  // デバッグ用: サンプルグループの自動投入 (アトミックに4組一括投入)
   const handleAddSampleGroups = async () => {
     actionLoadingRef.current = true;
     setActionLoading(true);
     setActionLoadingText('テストデータ4組を一括投入中...');
     try {
-      await createEntry({
-        session_id: `test-${Date.now()}-1`,
-        leader_name: '田中太郎',
-        team_name: 'Alpha 3名組',
-        headcount: 3,
-        preference: 'open',
-      });
-      await createEntry({
-        session_id: `test-${Date.now()}-2`,
-        leader_name: '佐藤花子',
-        team_name: 'Bravo 2名組',
-        headcount: 2,
-        preference: 'open',
-      });
-      await createEntry({
-        session_id: `test-${Date.now()}-3`,
-        leader_name: '鈴木一郎',
-        team_name: 'ソロCharlie',
-        headcount: 1,
-        preference: 'open',
-      });
-      await createEntry({
-        session_id: `test-${Date.now()}-4`,
-        leader_name: '高橋健太',
-        team_name: '貸切Delta',
-        headcount: 4,
-        preference: 'closed',
-      });
+      const updatedState = await addSampleGroups();
+      setQueueState(updatedState);
+      const now = new Date();
+      setLastUpdated(now.toLocaleTimeString('ja-JP'));
       setActionFeedback({
         type: 'info1',
         title: 'テストデータ投入完了',
-        message: '4組（Alpha 3名, Bravo 2名, Charlie 1名, Delta 4名）を投入し、スロットを再編成しました。',
+        message: '4組（Alpha 3名, Bravo 2名, Charlie 1名, Delta 4名）を一括投入し、スロットを再編成しました。',
       });
-      await fetchStatus(true);
     } catch (err: any) {
       alert(err.message || 'テストデータの投入に失敗しました');
     } finally {
@@ -314,10 +289,9 @@ export default function AdminPage() {
           <div className="flex items-center gap-3">
             <h1 className="text-xl font-bold tracking-wider">OVALANT 運営ダッシュボード (iPad)</h1>
             {/* デジタル庁公式 StatusBadge */}
-            <StatusBadge className="bg-solid-gray-800 border border-solid-gray-700 text-xs py-1 px-2.5">
-              <span className={`inline-block size-2 rounded-full ${isFetching ? 'bg-amber-400' : 'bg-emerald-400'} mr-1.5 align-middle`} />
+            <StatusBadge className="text-xs py-1 px-2.5">
               {isFetching ? '同期中...' : 'リアルタイム同期 (2s)'}
-              {lastUpdated && <span className="text-solid-gray-400 ml-1">({lastUpdated})</span>}
+              {lastUpdated && <span className="text-solid-gray-200 ml-1">({lastUpdated})</span>}
             </StatusBadge>
           </div>
           <p className="text-xs text-solid-gray-400 mt-0.5">受付呼出・試合進行・不在スキップ管理</p>
@@ -434,8 +408,8 @@ export default function AdminPage() {
                       <span
                         className={`px-2 py-0.5 rounded-4 text-[10px] font-bold ${
                           group.preference === 'closed'
-                            ? 'bg-amber-100 text-amber-800'
-                            : 'bg-blue-100 text-blue-800'
+                            ? 'bg-solid-gray-200 text-solid-gray-800 border border-solid-gray-400'
+                            : 'bg-key-50 text-key-900 border border-key-300'
                         }`}
                       >
                         {group.preference === 'closed' ? '貸切(8分)' : '合流(10分)'}
@@ -448,7 +422,6 @@ export default function AdminPage() {
                       <Button
                         size="xs"
                         variant="outline"
-                        className="border-red-600 text-red-600 hover:bg-red-50"
                         onClick={() => openSkipModal(group)}
                         disabled={actionLoading}
                       >
@@ -469,7 +442,7 @@ export default function AdminPage() {
       <ModalDialog ref={skipDialogRef}>
         <ModalDialogContent className="max-w-md">
           <ModalDialogHeader>
-            <ModalDialogHeading className="text-lg font-bold text-red-600">
+            <ModalDialogHeading className="text-lg font-bold text-solid-gray-900">
               ⚠️ 不在スキップの確認
             </ModalDialogHeading>
             <ModalDialogClose onClick={closeSkipModal} />
@@ -480,7 +453,7 @@ export default function AdminPage() {
                 以下のグループを<strong>不在としてスキップ（無効化）</strong>しますか？
               </p>
               {skipTarget && (
-                <div className="p-3 bg-red-50 border border-red-200 rounded-8 my-2 font-bold text-xs text-red-900">
+                <div className="p-3 bg-solid-gray-50 border border-solid-gray-300 rounded-8 my-2 font-bold text-xs text-solid-gray-900">
                   #{skipTarget.entry_number} {skipTarget.team_name} (代表: {skipTarget.leader_name} / {skipTarget.headcount}名)
                 </div>
               )}
@@ -497,7 +470,7 @@ export default function AdminPage() {
             <Button
               size="sm"
               variant="solid-fill"
-              className="bg-red-600 hover:bg-red-700 text-white min-w-32"
+              className="min-w-32"
               onClick={handleConfirmSkip}
               disabled={actionLoading}
             >

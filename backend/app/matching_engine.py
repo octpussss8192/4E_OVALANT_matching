@@ -61,14 +61,22 @@ class MatchingEngine:
                     "entries": [e.model_dump(mode="json") for e in self.entries],
                     "matches": [m.model_dump(mode="json") for m in self.matches],
                 }
-                # 一時ファイルを経由してアトミックに書き込み
                 target = self.storage_path
                 temp_file = target.with_suffix(".tmp")
-                with open(temp_file, "w", encoding="utf-8") as f:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
-                temp_file.replace(target)
+                try:
+                    with open(temp_file, "w", encoding="utf-8") as f:
+                        json.dump(data, f, ensure_ascii=False, indent=2)
+                    temp_file.replace(target)
+                except Exception:
+                    # Windows で replace が競合した場合は直接安全に上書き
+                    with open(target, "w", encoding="utf-8") as f:
+                        json.dump(data, f, ensure_ascii=False, indent=2)
+                    if temp_file.exists():
+                        try:
+                            temp_file.unlink()
+                        except Exception:
+                            pass
             except Exception as e:
-                # ログ出力のみ行い例外で処理を落とさない
                 print(f"[MatchingEngine] Failed to save state to {self.storage_path}: {e}")
 
     def load_state(self) -> None:
@@ -108,7 +116,6 @@ class MatchingEngine:
         created_at: Optional[datetime] = None,
     ) -> EntryGroup:
         with self._lock:
-            self.load_state()
             now = created_at or datetime.now()
 
             # 4名以上は友人が敵味方に分断されるのを防ぐため強制的に Closed
@@ -133,6 +140,40 @@ class MatchingEngine:
             self.save_state()
             return entry
 
+    def add_sample_groups(self) -> list[EntryGroup]:
+        """デバッグ用: 4組のサンプルデータをアトミックに一括投入"""
+        with self._lock:
+            now = datetime.now()
+            samples = [
+                ("Alpha 3名組", "田中太郎", 3, PreferenceType.OPEN),
+                ("Bravo 2名組", "佐藤花子", 2, PreferenceType.OPEN),
+                ("ソロCharlie", "鈴木一郎", 1, PreferenceType.OPEN),
+                ("貸切Delta", "高橋健太", 4, PreferenceType.CLOSED),
+            ]
+            added = []
+            for idx, (t_name, l_name, hc, pref) in enumerate(samples):
+                created = now + timedelta(seconds=idx)
+                actual_pref = PreferenceType.CLOSED if hc >= 4 else pref
+                entry = EntryGroup(
+                    id=f"entry-{int(created.timestamp() * 1000)}-{len(self.entries) + 1}",
+                    entry_number=self.next_entry_number,
+                    session_id=f"test-{int(now.timestamp())}-{idx + 1}",
+                    leader_name=l_name,
+                    team_name=t_name,
+                    headcount=hc,
+                    preference=actual_pref,
+                    status=EntryStatus.WAITING,
+                    created_at=created,
+                    updated_at=created,
+                )
+                self.next_entry_number += 1
+                self.entries.append(entry)
+                added.append(entry)
+
+            self.recalculate_slots(now)
+            self.save_state()
+            return added
+
     def _get_entry(self, entry_id: str) -> Optional[EntryGroup]:
         """self.entries 内のエントリー実体を取得"""
         return next((e for e in self.entries if e.id == entry_id), None)
@@ -147,7 +188,6 @@ class MatchingEngine:
         current_time: Optional[datetime] = None,
     ) -> bool:
         with self._lock:
-            self.load_state()
             now = current_time or datetime.now()
             target = self._get_entry(entry_id)
             if not target:
@@ -193,7 +233,6 @@ class MatchingEngine:
     # --------------------------------------------------------------------------
     def advance_match_lifecycle(self, current_time: Optional[datetime] = None) -> bool:
         with self._lock:
-            self.load_state()
             now = current_time or datetime.now()
 
             current = next((m for m in self.matches if m.status == MatchStatus.IN_PROGRESS), None)
