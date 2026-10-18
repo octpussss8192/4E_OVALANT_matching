@@ -7,6 +7,11 @@
 """
 
 from __future__ import annotations
+import json
+import os
+import tempfile
+import threading
+from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional
 from .models import (
@@ -22,13 +27,73 @@ from .models import (
 )
 
 
+def _get_storage_path() -> Path:
+    env_path = os.environ.get("MATCHING_STATE_PATH")
+    if env_path:
+        return Path(env_path)
+    base_dir = Path(__file__).resolve().parent.parent / "data"
+    try:
+        base_dir.mkdir(parents=True, exist_ok=True)
+        return base_dir / "matching_state.json"
+    except Exception:
+        fallback_dir = Path(tempfile.gettempdir())
+        return fallback_dir / "ovalant_matching_state.json"
+
+
 class MatchingEngine:
-    def __init__(self, flexible_wait_seconds: int = 600):
+    def __init__(self, flexible_wait_seconds: int = 600, storage_path: Optional[Path] = None):
+        self._lock = threading.RLock()
+        self.storage_path = storage_path or _get_storage_path()
         self.entries: list[EntryGroup] = []
         self.matches: list[Match] = []
         self.next_entry_number: int = 101
         self.next_match_number: int = 1
         self.flexible_wait_seconds: int = flexible_wait_seconds  # デフォルト10分 (600秒)
+        self.load_state()
+
+    def save_state(self) -> None:
+        """ディスクに内部状態を保存して永続化（プロセス再起動・リロード対策）"""
+        with self._lock:
+            try:
+                data = {
+                    "next_entry_number": self.next_entry_number,
+                    "next_match_number": self.next_match_number,
+                    "entries": [e.model_dump(mode="json") for e in self.entries],
+                    "matches": [m.model_dump(mode="json") for m in self.matches],
+                }
+                # 一時ファイルを経由してアトミックに書き込み
+                target = self.storage_path
+                temp_file = target.with_suffix(".tmp")
+                with open(temp_file, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                temp_file.replace(target)
+            except Exception as e:
+                # ログ出力のみ行い例外で処理を落とさない
+                print(f"[MatchingEngine] Failed to save state to {self.storage_path}: {e}")
+
+    def load_state(self) -> None:
+        """ディスクから内部状態を復元"""
+        with self._lock:
+            if not self.storage_path.exists():
+                return
+            try:
+                with open(self.storage_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                self.next_entry_number = data.get("next_entry_number", 101)
+                self.next_match_number = data.get("next_match_number", 1)
+                self.entries = [EntryGroup.model_validate(e) for e in data.get("entries", [])]
+                self.matches = [Match.model_validate(m) for m in data.get("matches", [])]
+            except Exception as e:
+                print(f"[MatchingEngine] Failed to load state from {self.storage_path}: {e}")
+
+    def reset(self) -> None:
+        """システム全体の全データ初期化"""
+        with self._lock:
+            self.entries.clear()
+            self.matches.clear()
+            self.next_entry_number = 101
+            self.next_match_number = 1
+            self.save_state()
 
     # --------------------------------------------------------------------------
     # 1. エントリー受付
@@ -42,28 +107,31 @@ class MatchingEngine:
         preference: PreferenceType,
         created_at: Optional[datetime] = None,
     ) -> EntryGroup:
-        now = created_at or datetime.now()
+        with self._lock:
+            self.load_state()
+            now = created_at or datetime.now()
 
-        # 4名以上は友人が敵味方に分断されるのを防ぐため強制的に Closed
-        actual_preference = PreferenceType.CLOSED if headcount >= 4 else preference
+            # 4名以上は友人が敵味方に分断されるのを防ぐため強制的に Closed
+            actual_preference = PreferenceType.CLOSED if headcount >= 4 else preference
 
-        entry = EntryGroup(
-            id=f"entry-{int(now.timestamp() * 1000)}-{len(self.entries) + 1}",
-            entry_number=self.next_entry_number,
-            session_id=session_id,
-            leader_name=leader_name,
-            team_name=team_name,
-            headcount=headcount,
-            preference=actual_preference,
-            status=EntryStatus.WAITING,
-            created_at=now,
-            updated_at=now,
-        )
-        self.next_entry_number += 1
-        self.entries.append(entry)
+            entry = EntryGroup(
+                id=f"entry-{int(now.timestamp() * 1000)}-{len(self.entries) + 1}",
+                entry_number=self.next_entry_number,
+                session_id=session_id,
+                leader_name=leader_name,
+                team_name=team_name,
+                headcount=headcount,
+                preference=actual_preference,
+                status=EntryStatus.WAITING,
+                created_at=now,
+                updated_at=now,
+            )
+            self.next_entry_number += 1
+            self.entries.append(entry)
 
-        self.recalculate_slots(now)
-        return entry
+            self.recalculate_slots(now)
+            self.save_state()
+            return entry
 
     # --------------------------------------------------------------------------
     # 2. 運営側操作: スキップ（無効化）
@@ -74,78 +142,84 @@ class MatchingEngine:
         reason: str = "呼び出し時不在のためスキップ",
         current_time: Optional[datetime] = None,
     ) -> bool:
-        now = current_time or datetime.now()
-        target = next((e for e in self.entries if e.id == entry_id), None)
-        if not target:
-            return False
+        with self._lock:
+            self.load_state()
+            now = current_time or datetime.now()
+            target = next((e for e in self.entries if e.id == entry_id), None)
+            if not target:
+                return False
 
-        if target.status in (EntryStatus.COMPLETED, EntryStatus.SKIPPED, EntryStatus.CANCELLED):
-            return False
+            if target.status in (EntryStatus.COMPLETED, EntryStatus.SKIPPED, EntryStatus.CANCELLED):
+                return False
 
-        target.status = EntryStatus.SKIPPED
-        target.skip_reason = reason
-        target.updated_at = now
+            target.status = EntryStatus.SKIPPED
+            target.skip_reason = reason
+            target.updated_at = now
 
-        # マッチに割り当てられていた場合の再編
-        if target.assigned_match_id:
-            match = next((m for m in self.matches if m.id == target.assigned_match_id), None)
-            if match and match.status != MatchStatus.FINISHED:
-                if match.is_closed_match:
-                    # Closedマッチは枠ごと破棄
-                    match.status = MatchStatus.CANCELLED
-                else:
-                    # Openマッチは解体し、残された相方グループは元のcreated_atを維持して待機キュー最優先に戻す
-                    match.status = MatchStatus.CANCELLED
-                    for partner in match.assigned_groups:
-                        if partner.id != target.id:
-                            partner.status = EntryStatus.WAITING
-                            partner.assigned_match_id = None
-                            partner.updated_at = now
-            target.assigned_match_id = None
+            # マッチに割り当てられていた場合の再編
+            if target.assigned_match_id:
+                match = next((m for m in self.matches if m.id == target.assigned_match_id), None)
+                if match and match.status != MatchStatus.FINISHED:
+                    if match.is_closed_match:
+                        # Closedマッチは枠ごと破棄
+                        match.status = MatchStatus.CANCELLED
+                    else:
+                        # Openマッチは解体し、残された相方グループは元のcreated_atを維持して待機キュー最優先に戻す
+                        match.status = MatchStatus.CANCELLED
+                        for partner in match.assigned_groups:
+                            if partner.id != target.id:
+                                partner.status = EntryStatus.WAITING
+                                partner.assigned_match_id = None
+                                partner.updated_at = now
+                target.assigned_match_id = None
 
-        # 空いた枠を即座に再計算・繰り上げ
-        self.recalculate_slots(now)
-        return True
+            # 空いた枠を即座に再計算・繰り上げ
+            self.recalculate_slots(now)
+            self.save_state()
+            return True
 
     # --------------------------------------------------------------------------
     # 3. 試合進行操作 (Advance)
     # --------------------------------------------------------------------------
     def advance_match_lifecycle(self, current_time: Optional[datetime] = None) -> bool:
-        now = current_time or datetime.now()
+        with self._lock:
+            self.load_state()
+            now = current_time or datetime.now()
 
-        current = next((m for m in self.matches if m.status == MatchStatus.IN_PROGRESS), None)
-        next_match = next((m for m in self.matches if m.status == MatchStatus.CALLING), None)
-        next_next = next((m for m in self.matches if m.status == MatchStatus.SCHEDULED), None)
+            current = next((m for m in self.matches if m.status == MatchStatus.IN_PROGRESS), None)
+            next_match = next((m for m in self.matches if m.status == MatchStatus.CALLING), None)
+            next_next = next((m for m in self.matches if m.status == MatchStatus.SCHEDULED), None)
 
-        if not current and not next_match and not next_next:
-            return False
+            if not current and not next_match and not next_next:
+                return False
 
-        # Current 終了
-        if current:
-            current.status = MatchStatus.FINISHED
-            current.ended_at = now
-            for g in current.assigned_groups:
-                g.status = EntryStatus.COMPLETED
-                g.updated_at = now
+            # Current 終了
+            if current:
+                current.status = MatchStatus.FINISHED
+                current.ended_at = now
+                for g in current.assigned_groups:
+                    g.status = EntryStatus.COMPLETED
+                    g.updated_at = now
 
-        # Next -> Current
-        if next_match:
-            next_match.status = MatchStatus.IN_PROGRESS
-            next_match.started_at = now
-            for g in next_match.assigned_groups:
-                g.status = EntryStatus.IN_MATCH
-                g.updated_at = now
+            # Next -> Current
+            if next_match:
+                next_match.status = MatchStatus.IN_PROGRESS
+                next_match.started_at = now
+                for g in next_match.assigned_groups:
+                    g.status = EntryStatus.IN_MATCH
+                    g.updated_at = now
 
-        # Next Next -> Next
-        if next_next:
-            next_next.status = MatchStatus.CALLING
-            for g in next_next.assigned_groups:
-                g.status = EntryStatus.CALLED
-                g.updated_at = now
+            # Next Next -> Next
+            if next_next:
+                next_next.status = MatchStatus.CALLING
+                for g in next_next.assigned_groups:
+                    g.status = EntryStatus.CALLED
+                    g.updated_at = now
 
-        # スロット空き補充
-        self.recalculate_slots(now)
-        return True
+            # スロット空き補充
+            self.recalculate_slots(now)
+            self.save_state()
+            return True
 
     # --------------------------------------------------------------------------
     # 4. スロット（Next, Next Next）の再計算とカスケード昇格

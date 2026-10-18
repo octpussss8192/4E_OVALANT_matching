@@ -28,3 +28,4 @@ skills-lock.json
 # Archive / Temp
 _archive/
 .pytest_cache/
+backend/data/
