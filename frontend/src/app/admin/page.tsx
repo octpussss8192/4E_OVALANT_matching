@@ -243,26 +243,52 @@ export default function AdminPage() {
     match: Match | null,
     slotTitle: string,
     actionButtonText: string,
+    slotType: 'current' | 'next' | 'next_next' = 'current',
   ) => {
+    // スロットごとの役割に応じた上品なアクセント
+    const borderTopClass =
+      slotType === 'current'
+        ? 'border-t-4 border-t-green-600'
+        : slotType === 'next'
+        ? 'border-t-4 border-t-key-900'
+        : 'border-t-4 border-t-solid-gray-400';
+
+    const slotBadgeText =
+      slotType === 'current'
+        ? '進行中'
+        : slotType === 'next'
+        ? '呼出中'
+        : '次回枠';
+
+    const slotBadgeClass =
+      slotType === 'current'
+        ? 'bg-green-50 text-green-800 border-green-300'
+        : slotType === 'next'
+        ? 'bg-key-50 text-key-900 border-key-300'
+        : 'bg-solid-gray-100 text-solid-gray-700 border-solid-gray-300';
+
     return (
-      <Card className="relative flex flex-col justify-between bg-white shadow-sm border border-solid-gray-300 min-h-[220px]">
+      <Card className={`relative flex flex-col justify-between bg-white shadow-sm border border-solid-gray-300 min-h-[220px] ${borderTopClass}`}>
         {/* 操作中オーバーレイ */}
         {actionLoading && (
-          <div className="absolute inset-0 bg-white/75 backdrop-blur-[0.5px] rounded-12 flex flex-col items-center justify-center z-10 gap-2 text-xs font-bold text-solid-gray-800">
+          <div className="absolute inset-0 bg-white/80 backdrop-blur-[0.5px] rounded-12 flex flex-col items-center justify-center z-10 gap-2 text-xs font-bold text-solid-gray-800">
             <Spinner className="size-6 text-key-900" />
             <span>{actionLoadingText || '更新中...'}</span>
           </div>
         )}
 
         <div>
-          <div className="flex items-center justify-between border-b border-solid-gray-200 pb-2 mb-3">
+          <div className="flex items-center justify-between border-b border-solid-gray-200 pb-2.5 mb-3">
             <div className="flex items-center gap-2">
-              <span className="font-bold text-sm text-solid-gray-800">{slotTitle}</span>
+              <span className="font-bold text-sm text-solid-gray-900">{slotTitle}</span>
+              <span className={`text-[11px] border px-2 py-0.5 rounded-4 font-bold ${slotBadgeClass}`}>
+                {slotBadgeText}
+              </span>
               {isFetching && <Spinner className="size-3.5 text-key-900" />}
             </div>
             {match && (
-              <span className="text-xs bg-key-50 text-key-900 border border-key-300 px-2 py-0.5 rounded-4 font-bold">
-                Match #{match.match_number} ({match.is_closed_match ? '貸切8分' : '通常10分'})
+              <span className="text-[11px] bg-solid-gray-100 text-solid-gray-700 border border-solid-gray-300 px-2 py-0.5 rounded-4 font-mono font-medium">
+                #{match.match_number} ({match.is_closed_match ? '8分枠' : '10分枠'})
               </span>
             )}
           </div>
@@ -273,36 +299,39 @@ export default function AdminPage() {
               <span>スロット状況を取得中...</span>
             </div>
           ) : match ? (
-            <div className="space-y-3">
-              <div className="space-y-2">
-                {match.assigned_groups.map((group) => (
-                  <div
-                    key={group.id}
-                    className="flex items-center justify-between p-2.5 bg-solid-gray-50 rounded-6 border border-solid-gray-200 text-xs"
-                  >
-                    <div>
-                      <span className="font-bold text-sm text-key-900 mr-2">#{group.entry_number}</span>
-                      <span className="font-bold text-solid-gray-900">{group.team_name}</span>
-                      <span className="text-solid-gray-500 ml-1">({group.headcount}名)</span>
-                      <div className="text-[10px] text-solid-gray-500">代表: {group.leader_name}</div>
+            <div className="space-y-2.5">
+              {match.assigned_groups.map((group) => (
+                <div
+                  key={group.id}
+                  className="flex items-center justify-between p-2.5 bg-solid-gray-50/80 rounded-8 border border-solid-gray-200 text-xs hover:bg-solid-gray-100/60 transition-colors"
+                >
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono font-bold text-key-900 bg-white border border-key-200 px-1.5 py-0.5 rounded-4 text-[11px]">
+                        #{group.entry_number}
+                      </span>
+                      <span className="font-bold text-solid-gray-900 text-sm">{group.team_name}</span>
+                      <span className="text-solid-gray-600 font-medium">({group.headcount}名)</span>
                     </div>
-                    <Button
-                      size="xs"
-                      variant="outline"
-                      onClick={() => openSkipModal(group)}
-                      disabled={actionLoading}
-                    >
-                      不在スキップ
-                    </Button>
+                    <div className="text-[11px] text-solid-gray-500 mt-0.5">代表: {group.leader_name}</div>
                   </div>
-                ))}
-              </div>
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    className="text-solid-gray-700 hover:text-red-800 hover:border-red-300 hover:bg-red-50 text-[11px]"
+                    onClick={() => openSkipModal(group)}
+                    disabled={actionLoading}
+                  >
+                    不在スキップ
+                  </Button>
+                </div>
+              ))}
             </div>
           ) : (
             <div className="py-10 text-center text-xs text-solid-gray-400">
               {actionLoading ? (
                 <div className="flex items-center justify-center gap-2 text-solid-gray-600 font-semibold">
-                  <Spinner className="size-4" /> スロット更新中...
+                  <Spinner className="size-4 text-key-900" /> スロット更新中...
                 </div>
               ) : (
                 '枠は現在空いています'
@@ -312,10 +341,10 @@ export default function AdminPage() {
         </div>
 
         {match && (
-          <div className="pt-4 mt-3 border-t border-solid-gray-200">
+          <div className="pt-3 mt-3 border-t border-solid-gray-200">
             <Button
               size="md"
-              variant="solid-fill"
+              variant={slotType === 'next_next' ? 'outline' : 'solid-fill'}
               className="w-full justify-center text-sm font-bold"
               onClick={() => handleAdvance(match.id)}
               disabled={actionLoading}
@@ -335,22 +364,34 @@ export default function AdminPage() {
   };
 
   return (
-    <main className="min-h-screen bg-solid-gray-100 p-6 flex flex-col">
-      {/* スタッフ管理ヘッダー (デジタル庁デザインシステム仕様) */}
-      <header className="flex flex-col md:flex-row md:items-center justify-between bg-solid-gray-900 text-white px-6 py-4 rounded-12 shadow mb-4 gap-4">
+    <main className="min-h-screen bg-solid-gray-50 p-6 flex flex-col">
+      {/* スタッフ管理ヘッダー (デジタル庁デザインシステム仕様: 上品な白基調＋Key Colorアクセント) */}
+      <header className="flex flex-col md:flex-row md:items-center justify-between bg-white border border-solid-gray-300 px-6 py-4 rounded-12 shadow-sm mb-6 gap-4">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-xl font-bold tracking-wider">OVALANT 運営ダッシュボード (iPad)</h1>
-            {/* デジタル庁公式 StatusBadge */}
-            <StatusBadge className="text-xs py-1 px-2.5">
-              {isFetching ? '同期中...' : 'リアルタイム連携 (Supabase)'}
-              {lastUpdated && <span className="text-solid-gray-200 ml-1">({lastUpdated})</span>}
-            </StatusBadge>
+            <div className="h-6 w-1 bg-key-900 rounded-full" />
+            <h1 className="text-xl font-bold tracking-tight text-solid-gray-900">
+              OVALANT 運営ダッシュボード
+            </h1>
+            <span className="text-xs bg-key-50 text-key-900 border border-key-300 px-2.5 py-1 rounded-6 font-bold inline-flex items-center gap-1.5">
+              {isFetching ? (
+                <>
+                  <Spinner className="size-3 text-key-900" /> 同期中...
+                </>
+              ) : (
+                <>
+                  <span className="size-2 rounded-full bg-green-500 animate-pulse" />
+                  リアルタイム連携 (Supabase)
+                </>
+              )}
+              {lastUpdated && <span className="text-solid-gray-500 font-normal">({lastUpdated})</span>}
+            </span>
           </div>
-          <p className="text-xs text-solid-gray-400 mt-0.5">受付呼出・試合進行・不在スキップ管理</p>
+          <p className="text-xs text-solid-gray-600 mt-1 pl-4">
+            3v3 サバイバルゲーム 試合進行・呼出・不在スキップ管理（スタッフ専用）
+          </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          {/* デジタル庁公式 Button コンポーネント群 */}
           <Button
             size="sm"
             variant="outline"
@@ -371,6 +412,7 @@ export default function AdminPage() {
           <Button
             size="sm"
             variant="outline"
+            className="text-red-800 border-red-300 hover:bg-red-50 hover:text-red-900"
             onClick={handleReset}
             disabled={actionLoading}
           >
@@ -407,16 +449,19 @@ export default function AdminPage() {
           queueState?.current_match ?? null,
           '1. 現在対戦中',
           '試合終了 (スロットを空けて繰り上げ)',
+          'current',
         )}
         {renderSlotManagement(
           queueState?.next_match ?? null,
           '2. 次の試合',
           '案内完了 (対戦中へ昇格)',
+          'next',
         )}
         {renderSlotManagement(
           queueState?.next_next_match ?? null,
           '3. その次の試合',
           '呼出開始 (Nextへ昇格)',
+          'next_next',
         )}
       </div>
 
@@ -435,13 +480,16 @@ export default function AdminPage() {
                     受付エントリー一覧 ({displayGroups.length}組)
                   </Heading>
                   {isFetching && <Spinner className="size-4 text-key-900" />}
-                  <span className="text-xs text-solid-gray-600">
-                    (待機中: {queueState?.total_waiting_groups ?? 0}組 / {queueState?.total_waiting_players ?? 0}名)
+                  <span className="text-xs bg-solid-gray-100 text-solid-gray-700 border border-solid-gray-200 px-2.5 py-1 rounded-4 font-medium">
+                    待機中: {queueState?.total_waiting_groups ?? 0}組 / {queueState?.total_waiting_players ?? 0}名
                   </span>
                 </div>
-                <span className="text-xs text-solid-gray-500">
-                  💡 サジェスト: {queueState?.suggestion_tip.message}
-                </span>
+                {queueState?.suggestion_tip.message && (
+                  <span className="text-xs bg-yellow-50 text-yellow-900 border border-yellow-200 px-3 py-1 rounded-6 font-medium inline-flex items-center gap-1.5">
+                    <span>💡</span>
+                    <span>{queueState.suggestion_tip.message}</span>
+                  </span>
+                )}
               </div>
 
               {!queueState ? (
@@ -450,74 +498,101 @@ export default function AdminPage() {
                   <span>待機キューの状況を取得中...</span>
                 </div>
               ) : displayGroups.length > 0 ? (
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto rounded-8 border border-solid-gray-200">
                   <table className="w-full text-left border-collapse text-xs">
                     <thead>
-                      <tr className="border-b bg-solid-gray-100 text-solid-gray-700">
-                        <th className="py-2.5 px-3 font-semibold">整理券</th>
-                        <th className="py-2.5 px-3 font-semibold">チーム名</th>
-                        <th className="py-2.5 px-3 font-semibold">代表者名</th>
-                        <th className="py-2.5 px-3 font-semibold">人数</th>
-                        <th className="py-2.5 px-3 font-semibold">希望</th>
-                        <th className="py-2.5 px-3 font-semibold">現在状況</th>
-                        <th className="py-2.5 px-3 font-semibold">受付時刻</th>
-                        <th className="py-2.5 px-3 font-semibold text-right">操作</th>
+                      <tr className="border-b border-solid-gray-300 bg-solid-gray-100/70 text-solid-gray-700">
+                        <th className="py-2.5 px-3.5 font-bold">整理券</th>
+                        <th className="py-2.5 px-3.5 font-bold">チーム名</th>
+                        <th className="py-2.5 px-3.5 font-bold">代表者名</th>
+                        <th className="py-2.5 px-3.5 font-bold">人数</th>
+                        <th className="py-2.5 px-3.5 font-bold">希望形式</th>
+                        <th className="py-2.5 px-3.5 font-bold">現在状況</th>
+                        <th className="py-2.5 px-3.5 font-bold">受付時刻</th>
+                        <th className="py-2.5 px-3.5 font-bold text-right">操作</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-solid-gray-200">
+                    <tbody className="divide-y divide-solid-gray-200 bg-white">
                       {displayGroups.map((group) => {
-                        let statusLabel = '待機中';
-                        let statusBadgeStyle = 'bg-solid-gray-536';
+                        let statusBadgeEl = (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-4 text-[11px] font-medium bg-solid-gray-50 text-solid-gray-600 border border-solid-gray-200">
+                            待機中
+                          </span>
+                        );
 
                         if (group.status === 'in_match') {
-                          statusLabel = '対戦中';
-                          statusBadgeStyle = 'bg-key-900';
+                          statusBadgeEl = (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-4 text-[11px] font-bold bg-green-50 text-green-800 border border-green-300">
+                              <span className="size-1.5 rounded-full bg-green-600" />
+                              対戦中
+                            </span>
+                          );
                         } else if (group.status === 'called') {
                           if (group.assigned_match_id === queueState.next_match?.id) {
-                            statusLabel = '呼出中 (Next)';
-                            statusBadgeStyle = 'bg-key-800';
+                            statusBadgeEl = (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-4 text-[11px] font-bold bg-key-50 text-key-900 border border-key-300">
+                                <span className="size-1.5 rounded-full bg-key-900 animate-pulse" />
+                                呼出中 (Next)
+                              </span>
+                            );
                           } else if (group.assigned_match_id === queueState.next_next_match?.id) {
-                            statusLabel = '次回呼出 (その次)';
-                            statusBadgeStyle = 'bg-solid-gray-700';
+                            statusBadgeEl = (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-4 text-[11px] font-bold bg-key-50/60 text-key-800 border border-key-200">
+                                次回呼出 (その次)
+                              </span>
+                            );
                           } else {
-                            statusLabel = '枠割当済';
-                            statusBadgeStyle = 'bg-solid-gray-600';
+                            statusBadgeEl = (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-4 text-[11px] font-medium bg-solid-gray-100 text-solid-gray-700 border border-solid-gray-300">
+                                枠割当済
+                              </span>
+                            );
                           }
                         } else if (group.status === 'skipped') {
-                          statusLabel = '不在スキップ';
-                          statusBadgeStyle = 'bg-solid-gray-400';
+                          statusBadgeEl = (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-4 text-[11px] font-medium bg-red-50 text-red-800 border border-red-200 line-through">
+                              不在スキップ
+                            </span>
+                          );
                         }
 
                         return (
-                          <tr key={group.id} className="hover:bg-solid-gray-50 transition-colors">
-                            <td className="py-2.5 px-3 font-bold text-key-900">#{group.entry_number}</td>
-                            <td className="py-2.5 px-3 font-bold text-solid-gray-900">{group.team_name}</td>
-                            <td className="py-2.5 px-3 text-solid-gray-600">{group.leader_name}</td>
-                            <td className="py-2.5 px-3 font-bold">{group.headcount}名</td>
-                            <td className="py-2.5 px-3">
+                          <tr key={group.id} className="hover:bg-solid-gray-50/70 transition-colors">
+                            <td className="py-2.5 px-3.5 font-mono font-bold text-key-900 text-sm">
+                              #{group.entry_number}
+                            </td>
+                            <td className="py-2.5 px-3.5 font-bold text-solid-gray-900 text-sm">
+                              {group.team_name}
+                            </td>
+                            <td className="py-2.5 px-3.5 text-solid-gray-600">
+                              {group.leader_name}
+                            </td>
+                            <td className="py-2.5 px-3.5 font-bold text-solid-gray-800">
+                              {group.headcount}名
+                            </td>
+                            <td className="py-2.5 px-3.5">
                               <span
-                                className={`px-2 py-0.5 rounded-4 text-[10px] font-bold ${
+                                className={`px-2 py-0.5 rounded-4 text-[11px] font-bold ${
                                   group.preference === 'closed'
-                                    ? 'bg-solid-gray-200 text-solid-gray-800 border border-solid-gray-400'
+                                    ? 'bg-solid-gray-100 text-solid-gray-800 border border-solid-gray-300'
                                     : 'bg-key-50 text-key-900 border border-key-300'
                                 }`}
                               >
-                                {group.preference === 'closed' ? '貸切(8分)' : '合流(10分)'}
+                                {group.preference === 'closed' ? '貸切(8分)' : '通常(10分)'}
                               </span>
                             </td>
-                            <td className="py-2.5 px-3">
-                              <StatusBadge className={`${statusBadgeStyle} text-[10px] py-0.5 px-2`}>
-                                {statusLabel}
-                              </StatusBadge>
+                            <td className="py-2.5 px-3.5">
+                              {statusBadgeEl}
                             </td>
-                            <td className="py-2.5 px-3 text-solid-gray-500">
+                            <td className="py-2.5 px-3.5 text-solid-gray-500 font-mono">
                               {new Date(group.created_at).toLocaleTimeString('ja-JP')}
                             </td>
-                            <td className="py-2.5 px-3 text-right">
+                            <td className="py-2.5 px-3.5 text-right">
                               {group.status !== 'skipped' && (
                                 <Button
                                   size="xs"
                                   variant="outline"
+                                  className="text-solid-gray-700 hover:text-red-800 hover:border-red-300 hover:bg-red-50 text-[11px]"
                                   onClick={() => openSkipModal(group)}
                                   disabled={actionLoading}
                                 >
