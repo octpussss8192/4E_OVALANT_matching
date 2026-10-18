@@ -133,6 +133,10 @@ class MatchingEngine:
             self.save_state()
             return entry
 
+    def _get_entry(self, entry_id: str) -> Optional[EntryGroup]:
+        """self.entries 内のエントリー実体を取得"""
+        return next((e for e in self.entries if e.id == entry_id), None)
+
     # --------------------------------------------------------------------------
     # 2. 運営側操作: スキップ（無効化）
     # --------------------------------------------------------------------------
@@ -145,7 +149,7 @@ class MatchingEngine:
         with self._lock:
             self.load_state()
             now = current_time or datetime.now()
-            target = next((e for e in self.entries if e.id == entry_id), None)
+            target = self._get_entry(entry_id)
             if not target:
                 return False
 
@@ -160,14 +164,20 @@ class MatchingEngine:
             if target.assigned_match_id:
                 match = next((m for m in self.matches if m.id == target.assigned_match_id), None)
                 if match and match.status != MatchStatus.FINISHED:
+                    match.status = MatchStatus.CANCELLED
                     if match.is_closed_match:
                         # Closedマッチは枠ごと破棄
-                        match.status = MatchStatus.CANCELLED
+                        pass
                     else:
                         # Openマッチは解体し、残された相方グループは元のcreated_atを維持して待機キュー最優先に戻す
-                        match.status = MatchStatus.CANCELLED
                         for partner in match.assigned_groups:
                             if partner.id != target.id:
+                                # self.entries 側の実体を確実に WAITING & match_id=None に戻す
+                                ent = self._get_entry(partner.id)
+                                if ent:
+                                    ent.status = EntryStatus.WAITING
+                                    ent.assigned_match_id = None
+                                    ent.updated_at = now
                                 partner.status = EntryStatus.WAITING
                                 partner.assigned_match_id = None
                                 partner.updated_at = now
@@ -200,6 +210,10 @@ class MatchingEngine:
                 for g in current.assigned_groups:
                     g.status = EntryStatus.COMPLETED
                     g.updated_at = now
+                    ent = self._get_entry(g.id)
+                    if ent:
+                        ent.status = EntryStatus.COMPLETED
+                        ent.updated_at = now
 
             # Next -> Current
             if next_match:
@@ -208,6 +222,10 @@ class MatchingEngine:
                 for g in next_match.assigned_groups:
                     g.status = EntryStatus.IN_MATCH
                     g.updated_at = now
+                    ent = self._get_entry(g.id)
+                    if ent:
+                        ent.status = EntryStatus.IN_MATCH
+                        ent.updated_at = now
 
             # Next Next -> Next
             if next_next:
@@ -215,6 +233,10 @@ class MatchingEngine:
                 for g in next_next.assigned_groups:
                     g.status = EntryStatus.CALLED
                     g.updated_at = now
+                    ent = self._get_entry(g.id)
+                    if ent:
+                        ent.status = EntryStatus.CALLED
+                        ent.updated_at = now
 
             # スロット空き補充
             self.recalculate_slots(now)
@@ -237,6 +259,10 @@ class MatchingEngine:
             for g in scheduled_match.assigned_groups:
                 g.status = EntryStatus.CALLED
                 g.updated_at = now
+                ent = self._get_entry(g.id)
+                if ent:
+                    ent.status = EntryStatus.CALLED
+                    ent.updated_at = now
             calling_match = scheduled_match
             scheduled_match = None
 
@@ -254,6 +280,11 @@ class MatchingEngine:
                     g.status = EntryStatus.CALLED
                     g.assigned_match_id = match.id
                     g.updated_at = now
+                    ent = self._get_entry(g.id)
+                    if ent:
+                        ent.status = EntryStatus.CALLED
+                        ent.assigned_match_id = match.id
+                        ent.updated_at = now
                 self.matches.append(match)
                 calling_match = match
 
@@ -271,6 +302,11 @@ class MatchingEngine:
                     g.status = EntryStatus.CALLED  # 案内済
                     g.assigned_match_id = match.id
                     g.updated_at = now
+                    ent = self._get_entry(g.id)
+                    if ent:
+                        ent.status = EntryStatus.CALLED
+                        ent.assigned_match_id = match.id
+                        ent.updated_at = now
                 self.matches.append(match)
 
     # --------------------------------------------------------------------------
