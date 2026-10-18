@@ -118,6 +118,7 @@ class QueueStatusResponse(BaseModel):
     total_waiting_groups: int
     total_waiting_players: int
     waiting_groups: list[EntryGroup] = Field(default_factory=list)
+    all_active_entries: list[EntryGroup] = Field(default_factory=list)
 
 
 class SkipEntryRequest(BaseModel):

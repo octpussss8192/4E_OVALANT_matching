@@ -81,7 +81,9 @@ export interface QueueStatusResponse {
   total_waiting_groups: number;
   total_waiting_players: number;
   waiting_groups: EntryGroup[];
+  all_active_entries?: EntryGroup[];
 }
+
 
 export interface CreateEntryRequest {
   session_id: string;

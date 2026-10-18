@@ -367,75 +367,122 @@ export default function AdminPage() {
         )}
       </div>
 
-      {/* 下段: 待機キュー一覧テーブル */}
+      {/* 下段: 受付グループ一覧テーブル（対戦中・呼出中・待機中を可視化） */}
       <Card className="flex-1 bg-white shadow-sm border border-solid-gray-300">
-        <div className="flex items-center justify-between border-b border-solid-gray-200 pb-3 mb-4">
-          <Heading size="20" hasChip={true} className="font-bold text-solid-gray-900">
-            待機キュー一覧 ({queueState?.total_waiting_groups ?? 0}組 / {queueState?.total_waiting_players ?? 0}名)
-          </Heading>
-          <span className="text-xs text-solid-gray-500">
-            💡 サジェスト: {queueState?.suggestion_tip.message}
-          </span>
-        </div>
+        {(() => {
+          const displayGroups = (queueState?.all_active_entries && queueState.all_active_entries.length > 0)
+            ? queueState.all_active_entries
+            : (queueState?.waiting_groups ?? []);
 
-        {!queueState ? (
-          <div className="py-12 flex flex-col items-center justify-center gap-2 text-xs text-solid-gray-500">
-            <Spinner className="size-5 text-key-900" />
-            <span>待機キューの状況を取得中...</span>
-          </div>
-        ) : queueState.waiting_groups.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="border-b bg-solid-gray-100 text-solid-gray-700">
-                  <th className="py-2.5 px-3 font-semibold">整理券</th>
-                  <th className="py-2.5 px-3 font-semibold">チーム名</th>
-                  <th className="py-2.5 px-3 font-semibold">代表者名</th>
-                  <th className="py-2.5 px-3 font-semibold">人数</th>
-                  <th className="py-2.5 px-3 font-semibold">希望</th>
-                  <th className="py-2.5 px-3 font-semibold">受付時刻</th>
-                  <th className="py-2.5 px-3 font-semibold text-right">操作</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-solid-gray-200">
-                {queueState.waiting_groups.map((group) => (
-                  <tr key={group.id} className="hover:bg-solid-gray-50 transition-colors">
-                    <td className="py-2.5 px-3 font-bold text-key-900">#{group.entry_number}</td>
-                    <td className="py-2.5 px-3 font-bold text-solid-gray-900">{group.team_name}</td>
-                    <td className="py-2.5 px-3 text-solid-gray-600">{group.leader_name}</td>
-                    <td className="py-2.5 px-3 font-bold">{group.headcount}名</td>
-                    <td className="py-2.5 px-3">
-                      <span
-                        className={`px-2 py-0.5 rounded-4 text-[10px] font-bold ${
-                          group.preference === 'closed'
-                            ? 'bg-solid-gray-200 text-solid-gray-800 border border-solid-gray-400'
-                            : 'bg-key-50 text-key-900 border border-key-300'
-                        }`}
-                      >
-                        {group.preference === 'closed' ? '貸切(8分)' : '合流(10分)'}
-                      </span>
-                    </td>
-                    <td className="py-2.5 px-3 text-solid-gray-500">
-                      {new Date(group.created_at).toLocaleTimeString('ja-JP')}
-                    </td>
-                    <td className="py-2.5 px-3 text-right">
-                      <Button
-                        size="xs"
-                        variant="outline"
-                        onClick={() => openSkipModal(group)}
-                        disabled={actionLoading}
-                      >
-                        不在スキップ
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="py-12 text-center text-xs text-solid-gray-400">現在、待機中のグループはありません。</div>
-        )}
+          return (
+            <>
+              <div className="flex items-center justify-between border-b border-solid-gray-200 pb-3 mb-4 flex-wrap gap-2">
+                <div className="flex items-center gap-3">
+                  <Heading size="20" hasChip={true} className="font-bold text-solid-gray-900">
+                    受付エントリー一覧 ({displayGroups.length}組)
+                  </Heading>
+                  <span className="text-xs text-solid-gray-600">
+                    (待機中: {queueState?.total_waiting_groups ?? 0}組 / {queueState?.total_waiting_players ?? 0}名)
+                  </span>
+                </div>
+                <span className="text-xs text-solid-gray-500">
+                  💡 サジェスト: {queueState?.suggestion_tip.message}
+                </span>
+              </div>
+
+              {!queueState ? (
+                <div className="py-12 flex flex-col items-center justify-center gap-2 text-xs text-solid-gray-500">
+                  <Spinner className="size-5 text-key-900" />
+                  <span>待機キューの状況を取得中...</span>
+                </div>
+              ) : displayGroups.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="border-b bg-solid-gray-100 text-solid-gray-700">
+                        <th className="py-2.5 px-3 font-semibold">整理券</th>
+                        <th className="py-2.5 px-3 font-semibold">チーム名</th>
+                        <th className="py-2.5 px-3 font-semibold">代表者名</th>
+                        <th className="py-2.5 px-3 font-semibold">人数</th>
+                        <th className="py-2.5 px-3 font-semibold">希望</th>
+                        <th className="py-2.5 px-3 font-semibold">現在状況</th>
+                        <th className="py-2.5 px-3 font-semibold">受付時刻</th>
+                        <th className="py-2.5 px-3 font-semibold text-right">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-solid-gray-200">
+                      {displayGroups.map((group) => {
+                        let statusLabel = '待機中';
+                        let statusBadgeStyle = 'bg-solid-gray-536';
+
+                        if (group.status === 'in_match') {
+                          statusLabel = '対戦中';
+                          statusBadgeStyle = 'bg-key-900';
+                        } else if (group.status === 'called') {
+                          if (group.assigned_match_id === queueState.next_match?.id) {
+                            statusLabel = '呼出中 (Next)';
+                            statusBadgeStyle = 'bg-key-800';
+                          } else if (group.assigned_match_id === queueState.next_next_match?.id) {
+                            statusLabel = '次回呼出 (その次)';
+                            statusBadgeStyle = 'bg-solid-gray-700';
+                          } else {
+                            statusLabel = '枠割当済';
+                            statusBadgeStyle = 'bg-solid-gray-600';
+                          }
+                        } else if (group.status === 'skipped') {
+                          statusLabel = '不在スキップ';
+                          statusBadgeStyle = 'bg-solid-gray-400';
+                        }
+
+                        return (
+                          <tr key={group.id} className="hover:bg-solid-gray-50 transition-colors">
+                            <td className="py-2.5 px-3 font-bold text-key-900">#{group.entry_number}</td>
+                            <td className="py-2.5 px-3 font-bold text-solid-gray-900">{group.team_name}</td>
+                            <td className="py-2.5 px-3 text-solid-gray-600">{group.leader_name}</td>
+                            <td className="py-2.5 px-3 font-bold">{group.headcount}名</td>
+                            <td className="py-2.5 px-3">
+                              <span
+                                className={`px-2 py-0.5 rounded-4 text-[10px] font-bold ${
+                                  group.preference === 'closed'
+                                    ? 'bg-solid-gray-200 text-solid-gray-800 border border-solid-gray-400'
+                                    : 'bg-key-50 text-key-900 border border-key-300'
+                                }`}
+                              >
+                                {group.preference === 'closed' ? '貸切(8分)' : '合流(10分)'}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3">
+                              <StatusBadge className={`${statusBadgeStyle} text-[10px] py-0.5 px-2`}>
+                                {statusLabel}
+                              </StatusBadge>
+                            </td>
+                            <td className="py-2.5 px-3 text-solid-gray-500">
+                              {new Date(group.created_at).toLocaleTimeString('ja-JP')}
+                            </td>
+                            <td className="py-2.5 px-3 text-right">
+                              {group.status !== 'skipped' && (
+                                <Button
+                                  size="xs"
+                                  variant="outline"
+                                  onClick={() => openSkipModal(group)}
+                                  disabled={actionLoading}
+                                >
+                                  不在スキップ
+                                </Button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="py-12 text-center text-xs text-solid-gray-400">現在、エントリー中のグループはありません。</div>
+              )}
+            </>
+          );
+        })()}
       </Card>
 
       {/* 不在スキップ確認モーダルダイアログ (デジタル庁公式コンポーネント) */}

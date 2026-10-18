@@ -74,6 +74,13 @@ def get_queue_status():
     total_waiting_players = sum(e.headcount for e in waiting_groups)
     tip = engine.calculate_suggestion_tip()
 
+    # 管理ダッシュボード用: 全有効エントリー（対戦中・呼出中・待機中・不在スキップ等）
+    all_active_entries = [
+        e for e in engine.entries
+        if e.status in (EntryStatus.WAITING, EntryStatus.CALLED, EntryStatus.IN_MATCH, EntryStatus.SKIPPED)
+    ]
+    all_active_entries.sort(key=lambda x: x.entry_number)
+
     return QueueStatusResponse(
         current_match=current_match,
         next_match=next_match,
@@ -82,7 +89,9 @@ def get_queue_status():
         total_waiting_groups=len(waiting_groups),
         total_waiting_players=total_waiting_players,
         waiting_groups=waiting_groups,
+        all_active_entries=all_active_entries,
     )
+
 
 
 @router.get("/entries/{entry_id}", response_model=EntryResponse)
