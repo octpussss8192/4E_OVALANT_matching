@@ -385,30 +385,36 @@ class MatchingEngine:
             return self._create_closed_match(first_group, current_time)
 
         # Case B: 先頭が Open の場合
-        # Openグループのみを対象に、1チーム最大3名・グループ分割なしで探索
         open_groups = [g for g in waiting_pool if g.preference == PreferenceType.OPEN]
-        if not open_groups:
-            return None
+        if open_groups:
+            target_g0 = open_groups[0]
+            candidates = open_groups[1:]
 
-        target_g0 = open_groups[0]
-        candidates = open_groups[1:]
+            # 優先度 1: ぴったり6名 (Red 3名 vs Blue 3名)
+            combo_6 = self._search_open_teams(target_g0, candidates, target_red=3, target_blue=3)
+            if combo_6:
+                red_groups, blue_groups = combo_6
+                return self._create_open_match(red_groups, blue_groups, current_time)
 
-        # Step 1: ぴったり6名 (Red 3名 vs Blue 3名) の探索
-        combo_6 = self._search_open_teams(target_g0, candidates, target_red=3, target_blue=3)
-        if combo_6:
-            red_groups, blue_groups = combo_6
-            return self._create_open_match(red_groups, blue_groups, current_time)
-
-        # Step 2: 待機時間閾値チェック（柔軟5名マッチング）
-        wait_seconds = (current_time - target_g0.created_at).total_seconds()
-        if wait_seconds >= self.flexible_wait_seconds:
-            # 5名マッチング (Red 3名 vs Blue 2名 または Red 2名 vs Blue 3名)
+            # 優先度 2: 5名マッチング即時成立 (Red 3名 vs Blue 2名 または Red 2名 vs Blue 3名)
             combo_5 = self._search_open_teams(target_g0, candidates, target_red=3, target_blue=2)
             if not combo_5:
                 combo_5 = self._search_open_teams(target_g0, candidates, target_red=2, target_blue=3)
             if combo_5:
                 red_groups, blue_groups = combo_5
                 return self._create_open_match(red_groups, blue_groups, current_time)
+
+            # 優先度 3: 4名マッチング即時成立 (Red 2名 vs Blue 2名: 2v2)
+            combo_4 = self._search_open_teams(target_g0, candidates, target_red=2, target_blue=2)
+            if combo_4:
+                red_groups, blue_groups = combo_4
+                return self._create_open_match(red_groups, blue_groups, current_time)
+
+        # Case C: 先頭の Open グループが人数不足で成立しない場合、
+        # 後続に単独で枠に入れる Closed (貸切内戦・4名以上) があればスロットを優先的に割当
+        closed_groups = [g for g in waiting_pool if g.preference == PreferenceType.CLOSED]
+        if closed_groups:
+            return self._create_closed_match(closed_groups[0], current_time)
 
         return None
 
@@ -525,22 +531,21 @@ class MatchingEngine:
             )
 
         # 待機列先頭のOpenグループを見て、あと何名いれば即座にマッチが組めるか計算
-        # 1チーム最大3名なので、先頭グループが1名なら [2名] を、2名なら [1名] をサジェスト
         g0 = open_waiting[0]
         if g0.headcount == 1:
             return SuggestionTip(
-                recommended_party_size=2,
-                message="現在【2名】組なら、すぐにご案内可能です！（Open枠）",
+                recommended_party_size=1,
+                message="現在【1名】または【2名】組なら、すぐに対戦マッチング可能です！（Open枠）",
             )
         elif g0.headcount == 2:
             return SuggestionTip(
-                recommended_party_size=1,
-                message="現在【1名】組なら、すぐにご案内可能です！（Open枠）",
+                recommended_party_size=2,
+                message="現在【2名】組（2v2）または【3名】組（3v2）なら、すぐに対戦可能です！",
             )
         else:  # 3名
             return SuggestionTip(
-                recommended_party_size=3,
-                message="現在【3名】組なら、すぐに対戦相手とマッチング可能です！（Open枠）",
+                recommended_party_size=2,
+                message="現在【2名】または【3名】組なら、すぐに対戦マッチング可能です！（Open枠）",
             )
 
     def get_group_status(self, entry_id: str) -> Optional[dict]:
