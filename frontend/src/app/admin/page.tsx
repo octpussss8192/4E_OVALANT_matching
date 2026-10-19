@@ -204,9 +204,14 @@ export default function AdminPage() {
     });
 
     // 画面アクティブ時同期: 他のタブやスリープから戻ってきた瞬間に即座に最新同期
+    // visibilitychange と focus の重複発火をデバウンス（300ms防振）して通信遅延を防止
+    let debounceTimer: NodeJS.Timeout | null = null;
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        fetchStatus(true);
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          fetchStatus(true);
+        }, 300);
       }
     };
 
@@ -215,6 +220,7 @@ export default function AdminPage() {
 
     return () => {
       unsubscribe();
+      if (debounceTimer) clearTimeout(debounceTimer);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('focus', handleVisibilityChange);
     };
@@ -617,7 +623,10 @@ export default function AdminPage() {
                       <Button
                         size="sm"
                         variant={viewMode === 'history' ? 'solid-fill' : 'outline'}
-                        onClick={() => setViewMode('history')}
+                        onClick={() => {
+                          setViewMode('history');
+                          fetchStatus(true);
+                        }}
                       >
                         全履歴 ({historyList.length})
                       </Button>
@@ -634,13 +643,19 @@ export default function AdminPage() {
                   </div>
                 </div>
 
-                {!queueState ? (
+                {!queueState || (displayGroups.length === 0 && isFetching) ? (
                   <div className="py-12 flex flex-col items-center justify-center gap-2 text-xs text-solid-gray-500">
-                    <Spinner className="size-5 text-key-900" />
-                    <span>エントリー状況を取得中...</span>
+                    <Spinner className="size-6 text-key-900" />
+                    <span>エントリー状況を取得・同期中...</span>
                   </div>
                 ) : displayGroups.length > 0 ? (
-                  <div className="overflow-x-auto -mx-6 px-6">
+                  <div className="overflow-x-auto -mx-6 px-6 relative">
+                    {/* 既存データ表示中の再同期プログレスバー */}
+                    {isFetching && (
+                      <div className="absolute top-0 left-6 right-6 h-0.5 bg-key-100 overflow-hidden z-10 rounded-full">
+                        <div className="h-full bg-key-900 animate-pulse w-full" />
+                      </div>
+                    )}
                     <table className="w-full text-left border-collapse text-xs">
                       <thead>
                         <tr className="border-b border-black bg-solid-gray-100 text-solid-gray-900">
