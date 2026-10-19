@@ -293,6 +293,7 @@ export default function ParticipantPage() {
             >
               <ul className="list-disc pl-4 space-y-1 text-xs text-solid-gray-700">
                 <li>呼出時に受付におられない場合、不在スキップとなり再エントリーが必要になります。</li>
+                <li>相手チームや味方に欠員が生じた場合は、運営スタッフが助っ人参加して3 vs 3の対戦を維持します。</li>
                 <li>「呼出中」の画面は消灯しないよう画面ロック防止機能が働きます。</li>
               </ul>
             </NotificationBanner>

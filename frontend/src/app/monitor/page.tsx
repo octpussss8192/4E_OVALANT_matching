@@ -90,7 +90,18 @@ export default function MonitorPage() {
                         <StatusBadge variant="error" size="sm">
                           赤チーム (RED)
                         </StatusBadge>
-                        <span className="text-xs text-solid-gray-700 font-semibold">{match.teams.red.total_count}名</span>
+                        <span className="text-xs text-solid-gray-700 font-semibold">
+                          {(match.teams.red.staff_count ?? 0) > 0 ? (
+                            <>
+                              {match.teams.red.total_count + (match.teams.red.staff_count ?? 0)}名
+                              <span className="text-[11px] text-solid-gray-500 font-normal ml-1">
+                                (参加{match.teams.red.total_count} + 助っ人{match.teams.red.staff_count})
+                              </span>
+                            </>
+                          ) : (
+                            `${match.teams.red.total_count}名`
+                          )}
+                        </span>
                       </div>
                       <ul className="divide-y divide-solid-gray-200 text-sm">
                         {match.teams.red.groups.map((g) => (
@@ -102,6 +113,18 @@ export default function MonitorPage() {
                             <span className="text-xs text-solid-gray-600 font-medium">({g.headcount}名)</span>
                           </li>
                         ))}
+                        {/* 運営スタッフ助っ人表示 */}
+                        {(match.teams.red.staff_count ?? 0) > 0 && (
+                          <li className="py-2 px-2.5 my-1.5 rounded-6 bg-solid-gray-100 border border-solid-gray-300 flex justify-between items-center text-solid-gray-900">
+                            <div className="flex items-center gap-1.5 font-bold text-xs text-solid-gray-800">
+                              <span>🛡️</span>
+                              <span>運営スタッフ (助っ人参加)</span>
+                            </div>
+                            <span className="text-xs bg-solid-gray-800 text-white font-bold px-2 py-0.5 rounded-4">
+                              +{match.teams.red.staff_count}名
+                            </span>
+                          </li>
+                        )}
                       </ul>
                     </div>
 
@@ -111,7 +134,18 @@ export default function MonitorPage() {
                         <StatusBadge variant="key" size="sm">
                           青チーム (BLUE)
                         </StatusBadge>
-                        <span className="text-xs text-solid-gray-700 font-semibold">{match.teams.blue.total_count}名</span>
+                        <span className="text-xs text-solid-gray-700 font-semibold">
+                          {(match.teams.blue.staff_count ?? 0) > 0 ? (
+                            <>
+                              {match.teams.blue.total_count + (match.teams.blue.staff_count ?? 0)}名
+                              <span className="text-[11px] text-solid-gray-500 font-normal ml-1">
+                                (参加{match.teams.blue.total_count} + 助っ人{match.teams.blue.staff_count})
+                              </span>
+                            </>
+                          ) : (
+                            `${match.teams.blue.total_count}名`
+                          )}
+                        </span>
                       </div>
                       <ul className="divide-y divide-solid-gray-200 text-sm">
                         {match.teams.blue.groups.map((g) => (
@@ -123,6 +157,18 @@ export default function MonitorPage() {
                             <span className="text-xs text-solid-gray-600 font-medium">({g.headcount}名)</span>
                           </li>
                         ))}
+                        {/* 運営スタッフ助っ人表示 */}
+                        {(match.teams.blue.staff_count ?? 0) > 0 && (
+                          <li className="py-2 px-2.5 my-1.5 rounded-6 bg-solid-gray-100 border border-solid-gray-300 flex justify-between items-center text-solid-gray-900">
+                            <div className="flex items-center gap-1.5 font-bold text-xs text-solid-gray-800">
+                              <span>🛡️</span>
+                              <span>運営スタッフ (助っ人参加)</span>
+                            </div>
+                            <span className="text-xs bg-solid-gray-800 text-white font-bold px-2 py-0.5 rounded-4">
+                              +{match.teams.blue.staff_count}名
+                            </span>
+                          </li>
+                        )}
                       </ul>
                     </div>
                   </div>
@@ -130,9 +176,15 @@ export default function MonitorPage() {
               )}
             </div>
 
-            <div className="mt-6 pt-3 border-t border-solid-gray-200 text-xs text-solid-gray-600 flex justify-between items-center">
-              <span>合計参加人数: <strong className="text-solid-gray-900 font-bold">{match.total_players}名</strong></span>
-              <span className="text-solid-gray-500 font-medium">受付完了済</span>
+            <div className="mt-6 pt-3 border-t border-solid-gray-200 text-xs text-solid-gray-600 flex justify-between items-center flex-wrap gap-2">
+              <span>合計対戦人数: <strong className="text-solid-gray-900 font-bold">{match.total_players}名</strong></span>
+              {(match.total_staff ?? 0) > 0 ? (
+                <span className="text-xs bg-solid-gray-200 text-solid-gray-800 font-bold px-2 py-0.5 rounded-4 border border-solid-gray-300">
+                  🛡️ スタッフ助っ人 {match.total_staff}名参加
+                </span>
+              ) : (
+                <span className="text-solid-gray-500 font-medium">受付完了済</span>
+              )}
             </div>
           </div>
         ) : (

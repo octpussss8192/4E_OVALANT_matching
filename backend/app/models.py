@@ -55,6 +55,7 @@ class TeamSideAssignment(BaseModel):
     team_side: TeamSideType
     groups: list[EntryGroup] = Field(default_factory=list)
     total_count: int = 0
+    staff_count: int = 0  # 運営スタッフ助っ人数 (不足時補充)
 
 
 class MatchTeams(BaseModel):
@@ -72,6 +73,7 @@ class Match(BaseModel):
     duration_minutes: int  # Open: 10分 / Closed: 8分
     assigned_groups: list[EntryGroup] = Field(default_factory=list)
     total_players: int = 0
+    total_staff: int = 0  # 運営スタッフ助っ人合計数
     teams: Optional[MatchTeams] = None
     started_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None

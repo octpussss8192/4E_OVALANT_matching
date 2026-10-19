@@ -242,34 +242,39 @@ class MatchingEngine:
                         remaining_red = [g for g in (match.teams.red.groups if match.teams else []) if g.id != target.id]
                         remaining_blue = [g for g in (match.teams.blue.groups if match.teams else []) if g.id != target.id]
 
-                        red_count = sum(g.headcount for g in remaining_red)
-                        blue_count = sum(g.headcount for g in remaining_blue)
+                        red_player_count = sum(g.headcount for g in remaining_red)
+                        blue_player_count = sum(g.headcount for g in remaining_blue)
 
-                        # 残ったメンバーで試合が成立できるか判定:
-                        # (3v3, 3v2, 2v3, 2v2) のいずれかを満たせば試合可能
-                        is_valid_match = (
-                            (red_count == 3 and blue_count == 3)
-                            or (red_count == 3 and blue_count == 2)
-                            or (red_count == 2 and blue_count == 3)
-                            or (red_count == 2 and blue_count == 2)
-                        )
-
-                        # スロット1 (IN_PROGRESS: 現在対戦中) および スロット2 (CALLING: 次の試合) では、
-                        # 既に呼び出し・入場・対戦中のため、再マッチングは行わずスロットを維持して進行する。
-                        # スロット3 (SCHEDULED: その次の試合) では、呼び出し前のため再マッチングを行い、
-                        # 待機列から別のグループを補充・再編成する。
+                        # スロット1 (IN_PROGRESS: 対戦中) および スロット2 (CALLING: 次の試合) では、
+                        # 既に呼出・入場中のため、マッチを解散させずスロットを維持する。
+                        # 両チームに1名以上のプレイヤーが残っていれば、不足人数を「運営スタッフ助っ人」として自動補充！
                         is_active_slot = match.status in (MatchStatus.CALLING, MatchStatus.IN_PROGRESS)
+                        can_support_with_staff = (red_player_count >= 1 and blue_player_count >= 1)
 
-                        if is_valid_match and is_active_slot:
-                            # 1.対戦中 / 2.次の試合: スロットを維持したままチーム構成を即時更新（相方は後ろに回されない）
+                        if is_active_slot and can_support_with_staff:
+                            # 各チームが3名になるよう、不足分を運営スタッフ助っ人として補充
+                            red_staff = max(0, 3 - red_player_count)
+                            blue_staff = max(0, 3 - blue_player_count)
+
                             match.assigned_groups = remaining_assigned
-                            match.total_players = red_count + blue_count
+                            match.total_players = red_player_count + blue_player_count + red_staff + blue_staff
+                            match.total_staff = red_staff + blue_staff
                             match.teams = MatchTeams(
-                                red=TeamSideAssignment(team_side=TeamSideType.RED, groups=remaining_red, total_count=red_count),
-                                blue=TeamSideAssignment(team_side=TeamSideType.BLUE, groups=remaining_blue, total_count=blue_count),
+                                red=TeamSideAssignment(
+                                    team_side=TeamSideType.RED,
+                                    groups=remaining_red,
+                                    total_count=red_player_count,
+                                    staff_count=red_staff,
+                                ),
+                                blue=TeamSideAssignment(
+                                    team_side=TeamSideType.BLUE,
+                                    groups=remaining_blue,
+                                    total_count=blue_player_count,
+                                    staff_count=blue_staff,
+                                ),
                             )
                         else:
-                            # 3.その次の試合 (SCHEDULED) または 人数バランスが崩れて不成立の場合:
+                            # 片方のチームが0名になった場合、または呼出前の枠で不成立の場合:
                             # マッチを解散し、残されたグループを待機キュー最優先（元の created_at を保持）に戻して再マッチングを行う
                             match.status = MatchStatus.CANCELLED
                             for partner in remaining_assigned:

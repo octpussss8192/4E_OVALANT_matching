@@ -40,6 +40,7 @@ export interface TeamSideAssignment {
   team_side: TeamSideType;
   groups: EntryGroup[];
   total_count: number;
+  staff_count?: number; // 運営スタッフ助っ人数
 }
 
 export interface MatchTeams {
@@ -55,6 +56,7 @@ export interface Match {
   duration_minutes: number;
   assigned_groups: EntryGroup[];
   total_players: number;
+  total_staff?: number; // 運営スタッフ助っ人合計数
   teams?: MatchTeams | null;
   started_at?: string | null;
   ended_at?: string | null;

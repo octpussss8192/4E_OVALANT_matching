@@ -450,6 +450,27 @@ export default function AdminPage() {
                     </Button>
                   </li>
                 ))}
+                {/* 運営スタッフ助っ人補充バッジ */}
+                {(match.total_staff ?? 0) > 0 && (
+                  <li className="py-2.5 px-3 my-1.5 rounded-6 bg-solid-gray-100 border border-solid-gray-300 flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-1.5 font-bold text-solid-gray-900">
+                      <span>🛡️</span>
+                      <span>運営スタッフ助っ人補充</span>
+                    </div>
+                    <div className="flex items-center gap-1 text-[11px] font-bold">
+                      {(match.teams?.red.staff_count ?? 0) > 0 && (
+                        <span className="bg-error-1 text-white px-2 py-0.5 rounded-4">
+                          赤 +{match.teams?.red.staff_count}名
+                        </span>
+                      )}
+                      {(match.teams?.blue.staff_count ?? 0) > 0 && (
+                        <span className="bg-key-900 text-white px-2 py-0.5 rounded-4">
+                          青 +{match.teams?.blue.staff_count}名
+                        </span>
+                      )}
+                    </div>
+                  </li>
+                )}
               </ul>
             </div>
           ) : (
@@ -769,8 +790,8 @@ export default function AdminPage() {
                   </div>
                 )}
                 <p className="text-xs text-solid-gray-600 leading-relaxed">
-                  ※ スキップされたグループはキューから除外され、再エントリーが必要になります。
-                  合流対戦(Open)でマッチングしていた相方グループは自動的に待機キュー最優先に戻り、即座に再マッチングされます。
+                  ※ スキップされたグループはキューから除外されます。
+                  呼出中・対戦中の試合枠では、<strong>不足人数を運営スタッフが助っ人補充して試合枠を維持</strong>し、相手チームは待たされずに予定通り試合を開始できます。
                 </p>
               </div>
             </ModalDialogBody>
