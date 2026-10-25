@@ -64,13 +64,13 @@ export default function ParticipantPage() {
         setIsOffline(false);
 
         // 自エントリーが保存されていれば最新状態を追従
-        const savedEntryId = localStorage.getItem('ovalant_my_entry_id');
+        const savedEntryId = localStorage.getItem('overter_watch_my_entry_id');
         if (savedEntryId) {
           try {
             const entryData = await getEntryStatus(savedEntryId);
             setMyEntryInfo(entryData);
           } catch {
-            localStorage.removeItem('ovalant_my_entry_id');
+            localStorage.removeItem('overter_watch_my_entry_id');
             setMyEntryInfo(null);
           }
         }
@@ -112,7 +112,7 @@ export default function ParticipantPage() {
         preference: headcount >= 4 ? 'closed' : preference,
       });
       setMyEntryInfo(res);
-      localStorage.setItem('ovalant_my_entry_id', res.entry.id);
+      localStorage.setItem('overter_watch_my_entry_id', res.entry.id);
     } catch (err: any) {
       setErrorMessage(err.message || 'エントリーの送信に失敗しました');
     } finally {
@@ -138,7 +138,7 @@ export default function ParticipantPage() {
             <span className="w-1.5 h-6 bg-key-900 rounded-full inline-block shrink-0" aria-hidden="true" />
             <div>
               <Heading size="20" className="font-bold text-solid-gray-900 leading-tight">
-                OVALANT
+                OVERTER WATCH2026
               </Heading>
               <p className="text-xs text-solid-gray-600">3v3 赤外線シューティング マッチング</p>
             </div>

@@ -1,4 +1,4 @@
-"""Supabase REST API client for OVALANT backend.
+"""Supabase REST API client for OVERTER WATCH2026 backend.
 Enables real-time shared state across all Vercel Serverless Functions.
 """
 
@@ -16,6 +16,7 @@ from .models import (
     TeamSideAssignment,
     TeamSideType,
 )
+from .datetime_utils import parse_iso_datetime
 
 DEFAULT_SUPABASE_URL = "https://wfvujsbcwelbkysrioxp.supabase.co"
 DEFAULT_SUPABASE_KEY = "sb_publishable_hz-XugfYZSwLEtXqjsTnAw_zY9xLlD_"
@@ -29,54 +30,52 @@ def get_supabase_config() -> tuple[str, str]:
     ).rstrip("/")
     key = (
         os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-        or os.environ.get("SUPABASE_KEY")
+        or os.environ.get("SUPABASE_ANON_KEY")
         or os.environ.get("NEXT_PUBLIC_SUPABASE_ANON_KEY")
-        or os.environ.get("NEXT_PUBLIC_SUPABASE_KEY")
         or DEFAULT_SUPABASE_KEY
     )
     return url, key
 
 
 class SupabaseStorage:
-    def __init__(self):
-        self.url, self.key = get_supabase_config()
-        self.headers = {
-            "apikey": self.key,
-            "Authorization": f"Bearer {self.key}",
-            "Content-Type": "application/json",
-            "Prefer": "return=representation,resolution=merge-duplicates",
-        }
-        self.base_url = f"{self.url}/rest/v1"
-        self._client: Optional[httpx.Client] = None
+    """Supabase REST API を通じた共有ステート永続化"""
 
-    def _get_client(self) -> httpx.Client:
-        """TCP/TLS コネクションを維持・再利用して Supabase 通信を数倍に高速化"""
-        if self._client is None or self._client.is_closed:
-            self._client = httpx.Client(
-                base_url=self.base_url,
-                headers=self.headers,
-                timeout=5.0,
-                limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
-            )
-        return self._client
+    def __init__(self, url: Optional[str] = None, key: Optional[str] = None):
+        default_url, default_key = get_supabase_config()
+        self.url = (url or default_url).rstrip("/")
+        self.key = key or default_key
+        self._client: Optional[httpx.Client] = None
 
     def is_configured(self) -> bool:
         return bool(self.url and self.key)
 
+    def _get_client(self) -> httpx.Client:
+        if self._client is None or self._client.is_closed:
+            headers = {
+                "apikey": self.key,
+                "Authorization": f"Bearer {self.key}",
+                "Content-Type": "application/json",
+                "Prefer": "resolution=merge-duplicates",
+            }
+            self._client = httpx.Client(
+                base_url=f"{self.url}/rest/v1",
+                headers=headers,
+                timeout=5.0,
+            )
+        return self._client
+
     def load_state(self) -> Optional[dict[str, Any]]:
-        """Supabase から最新の entries と matches を復元"""
+        """Supabase から entries と matches を読み込んでインメモリ復元用 dict を返す"""
         if not self.is_configured():
             return None
+
         try:
             client = self._get_client()
             r_entries = client.get("/entries?select=*&order=entry_number.asc")
-            if r_entries.status_code != 200:
-                print(f"[SupabaseStorage] Failed to get entries: {r_entries.status_code} {r_entries.text}")
-                return None
-
             r_matches = client.get("/matches?select=*&order=match_number.asc")
-            if r_matches.status_code != 200:
-                print(f"[SupabaseStorage] Failed to get matches: {r_matches.status_code} {r_matches.text}")
+
+            if r_entries.status_code != 200 or r_matches.status_code != 200:
+                print(f"[SupabaseStorage] load_state fetch error: entries={r_entries.status_code}, matches={r_matches.status_code}")
                 return None
 
             r_links = client.get("/match_entries?select=*")
@@ -101,8 +100,8 @@ class SupabaseStorage:
                             status=EntryStatus(e["status"]),
                             assigned_match_id=str(e["assigned_match_id"]) if e.get("assigned_match_id") else None,
                             skip_reason=e.get("skip_reason"),
-                            created_at=datetime.fromisoformat(e["created_at"]),
-                            updated_at=datetime.fromisoformat(e["updated_at"]),
+                            created_at=parse_iso_datetime(e["created_at"]),
+                            updated_at=parse_iso_datetime(e["updated_at"]),
                         )
                     )
                 except Exception as parse_err:
@@ -127,16 +126,21 @@ class SupabaseStorage:
                     red_groups = [entries_by_id[gid] for gid in red_group_ids if gid in entries_by_id]
                     blue_groups = [entries_by_id[gid] for gid in blue_group_ids if gid in entries_by_id]
 
+                    red_count = sum(g.headcount for g in red_groups)
+                    blue_count = sum(g.headcount for g in blue_groups)
+
                     teams = MatchTeams(
                         red=TeamSideAssignment(
                             team_side=TeamSideType.RED,
                             groups=red_groups,
-                            total_count=sum(g.headcount for g in red_groups),
+                            total_count=red_count,
+                            staff_count=max(0, 3 - red_count) if not bool(m["is_closed_match"]) else 0,
                         ),
                         blue=TeamSideAssignment(
                             team_side=TeamSideType.BLUE,
                             groups=blue_groups,
-                            total_count=sum(g.headcount for g in blue_groups),
+                            total_count=blue_count,
+                            staff_count=max(0, 3 - blue_count) if not bool(m["is_closed_match"]) else 0,
                         ),
                     )
 
@@ -150,9 +154,9 @@ class SupabaseStorage:
                             assigned_groups=assigned_groups,
                             total_players=int(m["total_players"]),
                             teams=teams,
-                            started_at=datetime.fromisoformat(m["started_at"]) if m.get("started_at") else None,
-                            ended_at=datetime.fromisoformat(m["ended_at"]) if m.get("ended_at") else None,
-                            created_at=datetime.fromisoformat(m["created_at"]),
+                            started_at=parse_iso_datetime(m["started_at"]) if m.get("started_at") else None,
+                            ended_at=parse_iso_datetime(m["ended_at"]) if m.get("ended_at") else None,
+                            created_at=parse_iso_datetime(m["created_at"]),
                         )
                     )
                 except Exception as parse_err:

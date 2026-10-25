@@ -1,8 +1,8 @@
-"""Core matching engine implementation strictly following OVALANT rules.
+"""Core matching engine implementation strictly following OVERTER WATCH2026 rules.
 - Rule: '味方は身内、敵は他人' (No group splitting, 1 team max 3 players).
 - 4-6 players automatically forced to Closed (8 min duration).
 - 1-3 players can choose Open (10 min) or Closed (8 min).
-- Flexible 5-player fallback when waiting >= 10 minutes.
+- Flexible 5-player fallback when waiting >= flexible_wait_seconds (default 10 minutes).
 - 3-slot pipeline (current, next, next_next) with cascade promotion and skip handling.
 """
 
@@ -27,6 +27,7 @@ from .models import (
     TeamSideType,
 )
 from .supabase_client import SupabaseStorage
+from .datetime_utils import now_utc, ensure_utc
 
 
 def _get_storage_path() -> Path:
@@ -39,7 +40,7 @@ def _get_storage_path() -> Path:
         return base_dir / "matching_state.json"
     except Exception:
         fallback_dir = Path(tempfile.gettempdir())
-        return fallback_dir / "ovalant_matching_state.json"
+        return fallback_dir / "overter_watch_matching_state.json"
 
 
 class MatchingEngine:
@@ -49,54 +50,52 @@ class MatchingEngine:
         storage_path: Optional[Path] = None,
         disable_supabase: bool = False,
     ):
-        self._lock = threading.RLock()
+        self.flexible_wait_seconds = flexible_wait_seconds
         self.storage_path = storage_path or _get_storage_path()
         self.disable_supabase = disable_supabase
-        self.supabase = SupabaseStorage()
+        self._lock = threading.Lock()
+
         self.entries: list[EntryGroup] = []
         self.matches: list[Match] = []
         self.next_entry_number: int = 101
         self.next_match_number: int = 1
-        self.flexible_wait_seconds: int = flexible_wait_seconds  # デフォルト10分 (600秒)
+
+        self.supabase = SupabaseStorage()
+
         self.load_state()
 
+    # --------------------------------------------------------------------------
+    # 永続化（Supabase 優先、ローカル JSON フォールバック）
+    # --------------------------------------------------------------------------
     def save_state(self) -> None:
-        """ディスクおよび Supabase に内部状態を保存して永続化（Vercel全コンテナ共有）"""
-        with self._lock:
-            # 1. Supabase 同期 (Vercel Serverless Function 間の完全共有)
-            if not self.disable_supabase and self.supabase.is_configured():
-                self.supabase.save_state(self.entries, self.matches)
-
-            # 2. ローカルディスク保存 (フォールバック)
+        """状態保存"""
+        # 1. Supabase 同期
+        if not self.disable_supabase and self.supabase.is_configured():
             try:
-                data = {
-                    "next_entry_number": self.next_entry_number,
-                    "next_match_number": self.next_match_number,
-                    "entries": [e.model_dump(mode="json") for e in self.entries],
-                    "matches": [m.model_dump(mode="json") for m in self.matches],
-                }
-                target = self.storage_path
-                temp_file = target.with_suffix(".tmp")
-                try:
-                    with open(temp_file, "w", encoding="utf-8") as f:
-                        json.dump(data, f, ensure_ascii=False, indent=2)
-                    temp_file.replace(target)
-                except Exception:
-                    # Windows で replace が競合した場合は直接安全に上書き
-                    with open(target, "w", encoding="utf-8") as f:
-                        json.dump(data, f, ensure_ascii=False, indent=2)
-                    if temp_file.exists():
-                        try:
-                            temp_file.unlink()
-                        except Exception:
-                            pass
+                self.supabase.save_state(self.entries, self.matches)
             except Exception as e:
-                print(f"[MatchingEngine] Failed to save state to {self.storage_path}: {e}")
+                print(f"[MatchingEngine] Supabase save error: {e}")
+
+        # 2. ローカルディスクフォールバック
+        try:
+            self.storage_path.parent.mkdir(parents=True, exist_ok=True)
+            temp_path = self.storage_path.with_suffix(".tmp")
+            data = {
+                "next_entry_number": self.next_entry_number,
+                "next_match_number": self.next_match_number,
+                "entries": [e.model_dump(mode="json") for e in self.entries],
+                "matches": [m.model_dump(mode="json") for m in self.matches],
+            }
+            with open(temp_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            temp_path.replace(self.storage_path)
+        except Exception as e:
+            print(f"[MatchingEngine] Failed to save state to {self.storage_path}: {e}")
 
     def load_state(self) -> None:
-        """Supabase またはディスクから内部状態を復元"""
+        """状態復元"""
         with self._lock:
-            # 1. Supabase から優先復元 (Vercel Serverless Function 間の完全共有)
+            # 1. Supabase から復元
             if not self.disable_supabase and self.supabase.is_configured():
                 state = self.supabase.load_state()
                 if state:
@@ -143,7 +142,7 @@ class MatchingEngine:
         created_at: Optional[datetime] = None,
     ) -> EntryGroup:
         with self._lock:
-            now = created_at or datetime.now()
+            now = ensure_utc(created_at) if created_at else now_utc()
 
             # 4名以上は友人が敵味方に分断されるのを防ぐため強制的に Closed
             actual_preference = PreferenceType.CLOSED if headcount >= 4 else preference
@@ -170,7 +169,7 @@ class MatchingEngine:
     def add_sample_groups(self) -> list[EntryGroup]:
         """デバッグ用: 4組のサンプルデータをアトミックに一括投入"""
         with self._lock:
-            now = datetime.now()
+            now = now_utc()
             samples = [
                 ("Alpha 3名組", "田中太郎", 3, PreferenceType.OPEN),
                 ("Bravo 2名組", "佐藤花子", 2, PreferenceType.OPEN),
@@ -215,7 +214,7 @@ class MatchingEngine:
         current_time: Optional[datetime] = None,
     ) -> bool:
         with self._lock:
-            now = current_time or datetime.now()
+            now = ensure_utc(current_time) if current_time else now_utc()
             target = self._get_entry(entry_id)
             if not target:
                 return False
@@ -257,8 +256,7 @@ class MatchingEngine:
                             blue_staff = max(0, 3 - blue_player_count)
 
                             match.assigned_groups = remaining_assigned
-                            match.total_players = red_player_count + blue_player_count + red_staff + blue_staff
-                            match.total_staff = red_staff + blue_staff
+                            match.total_players = red_player_count + blue_player_count
                             match.teams = MatchTeams(
                                 red=TeamSideAssignment(
                                     team_side=TeamSideType.RED,
@@ -298,7 +296,7 @@ class MatchingEngine:
     # --------------------------------------------------------------------------
     def advance_match_lifecycle(self, current_time: Optional[datetime] = None) -> bool:
         with self._lock:
-            now = current_time or datetime.now()
+            now = ensure_utc(current_time) if current_time else now_utc()
 
             current = next((m for m in self.matches if m.status == MatchStatus.IN_PROGRESS), None)
             next_match = next((m for m in self.matches if m.status == MatchStatus.CALLING), None)
@@ -351,7 +349,7 @@ class MatchingEngine:
     # 4. スロット（Next, Next Next）の再計算とカスケード昇格
     # --------------------------------------------------------------------------
     def recalculate_slots(self, current_time: Optional[datetime] = None) -> None:
-        now = current_time or datetime.now()
+        now = ensure_utc(current_time) if current_time else now_utc()
 
         # アクティブなスロットを取得
         calling_match = next((m for m in self.matches if m.status == MatchStatus.CALLING), None)
@@ -373,7 +371,7 @@ class MatchingEngine:
         waiting_pool = [
             e for e in self.entries if e.status == EntryStatus.WAITING
         ]
-        waiting_pool.sort(key=lambda x: x.created_at)
+        waiting_pool.sort(key=lambda x: ensure_utc(x.created_at))
 
         # Next 枠が依然として空いていれば探索
         if not calling_match and waiting_pool:
@@ -396,7 +394,7 @@ class MatchingEngine:
         remaining_pool = [
             e for e in self.entries if e.status == EntryStatus.WAITING
         ]
-        remaining_pool.sort(key=lambda x: x.created_at)
+        remaining_pool.sort(key=lambda x: ensure_utc(x.created_at))
 
         if not scheduled_match and remaining_pool:
             match = self._find_next_combination(remaining_pool, now)
@@ -434,25 +432,28 @@ class MatchingEngine:
             target_g0 = open_groups[0]
             candidates = open_groups[1:]
 
-            # 優先度 1: ぴったり6名 (Red 3名 vs Blue 3名)
+            # 優先度 1: ぴったり6名 (Red 3名 vs Blue 3名) -> 即座に成立
             combo_6 = self._search_open_teams(target_g0, candidates, target_red=3, target_blue=3)
             if combo_6:
                 red_groups, blue_groups = combo_6
                 return self._create_open_match(red_groups, blue_groups, current_time)
 
-            # 優先度 2: 5名マッチング即時成立 (Red 3名 vs Blue 2名 または Red 2名 vs Blue 3名)
-            combo_5 = self._search_open_teams(target_g0, candidates, target_red=3, target_blue=2)
-            if not combo_5:
-                combo_5 = self._search_open_teams(target_g0, candidates, target_red=2, target_blue=3)
-            if combo_5:
-                red_groups, blue_groups = combo_5
-                return self._create_open_match(red_groups, blue_groups, current_time)
+            # 待機時間が閾値（flexible_wait_seconds）を超過しているか判定
+            wait_seconds = (ensure_utc(current_time) - ensure_utc(target_g0.created_at)).total_seconds()
+            if wait_seconds >= self.flexible_wait_seconds:
+                # 優先度 2: 5名マッチング (Red 3名 vs Blue 2名 または Red 2名 vs Blue 3名 + スタッフ1名補充)
+                combo_5 = self._search_open_teams(target_g0, candidates, target_red=3, target_blue=2)
+                if not combo_5:
+                    combo_5 = self._search_open_teams(target_g0, candidates, target_red=2, target_blue=3)
+                if combo_5:
+                    red_groups, blue_groups = combo_5
+                    return self._create_open_match(red_groups, blue_groups, current_time)
 
-            # 優先度 3: 4名マッチング即時成立 (Red 2名 vs Blue 2名: 2v2)
-            combo_4 = self._search_open_teams(target_g0, candidates, target_red=2, target_blue=2)
-            if combo_4:
-                red_groups, blue_groups = combo_4
-                return self._create_open_match(red_groups, blue_groups, current_time)
+                # 優先度 3: 4名マッチング (Red 2名 vs Blue 2名: 2v2 + スタッフ各1名補充)
+                combo_4 = self._search_open_teams(target_g0, candidates, target_red=2, target_blue=2)
+                if combo_4:
+                    red_groups, blue_groups = combo_4
+                    return self._create_open_match(red_groups, blue_groups, current_time)
 
         # Case C: 先頭の Open グループが人数不足で成立しない場合、
         # 後続に単独で枠に入れる Closed (貸切内戦・4名以上) があればスロットを優先的に割当
@@ -469,23 +470,27 @@ class MatchingEngine:
         target_red: int,
         target_blue: int,
     ) -> Optional[tuple[list[EntryGroup], list[EntryGroup]]]:
-        """g0 を Red に固定し、グループ分割なしで Red(target_red) と Blue(target_blue) を満たす組み合わせを FIFO 探索"""
-        if g0.headcount > target_red:
+        """target_g0 を Red チームの先頭に固定し、
+        Red チームの合計人数が target_red、
+        Blue チームの合計人数が target_blue になる組み合わせを探索する。
+        """
+        needed_for_red = target_red - g0.headcount
+        if needed_for_red < 0:
             return None
 
-        needed_for_red = target_red - g0.headcount
-
-        # Red の残りを埋めるグループ群を探索
         def find_subsets(
-            pool: list[EntryGroup], target_sum: int, start_idx: int = 0
+            pool: list[EntryGroup], target_sum: int
         ) -> list[tuple[list[EntryGroup], list[EntryGroup]]]:
-            # 返り値: [(選ばれたグループ, 残りのプール)]
             results = []
 
-            def recurse(idx: int, cur_sum: int, chosen: list[EntryGroup], unchosen: list[EntryGroup]):
+            def recurse(
+                idx: int,
+                cur_sum: int,
+                chosen: list[EntryGroup],
+                unchosen: list[EntryGroup],
+            ):
                 if cur_sum == target_sum:
-                    # 残りをすべて unchosen に追加
-                    results.append((list(chosen), unchosen + pool[idx:]))
+                    results.append((chosen, unchosen + pool[idx:]))
                     return
                 if cur_sum > target_sum or idx >= len(pool):
                     return
@@ -527,8 +532,8 @@ class MatchingEngine:
             assigned_groups=[group],
             total_players=group.headcount,
             teams=MatchTeams(
-                red=TeamSideAssignment(team_side=TeamSideType.RED, groups=[group], total_count=group.headcount),
-                blue=TeamSideAssignment(team_side=TeamSideType.BLUE, groups=[], total_count=0),
+                red=TeamSideAssignment(team_side=TeamSideType.RED, groups=[group], total_count=group.headcount, staff_count=0),
+                blue=TeamSideAssignment(team_side=TeamSideType.BLUE, groups=[], total_count=0, staff_count=0),
             ),
             created_at=current_time,
         )
@@ -542,6 +547,8 @@ class MatchingEngine:
 
         red_count = sum(g.headcount for g in red_groups)
         blue_count = sum(g.headcount for g in blue_groups)
+        red_staff = max(0, 3 - red_count)
+        blue_staff = max(0, 3 - blue_count)
         all_groups = red_groups + blue_groups
 
         match = Match(
@@ -553,8 +560,18 @@ class MatchingEngine:
             assigned_groups=all_groups,
             total_players=red_count + blue_count,
             teams=MatchTeams(
-                red=TeamSideAssignment(team_side=TeamSideType.RED, groups=red_groups, total_count=red_count),
-                blue=TeamSideAssignment(team_side=TeamSideType.BLUE, groups=blue_groups, total_count=blue_count),
+                red=TeamSideAssignment(
+                    team_side=TeamSideType.RED,
+                    groups=red_groups,
+                    total_count=red_count,
+                    staff_count=red_staff,
+                ),
+                blue=TeamSideAssignment(
+                    team_side=TeamSideType.BLUE,
+                    groups=blue_groups,
+                    total_count=blue_count,
+                    staff_count=blue_staff,
+                ),
             ),
             created_at=current_time,
         )
@@ -620,7 +637,7 @@ class MatchingEngine:
         if slot_name == "waiting":
             ahead_count = sum(
                 1 for e in self.entries
-                if e.status == EntryStatus.WAITING and e.created_at < group.created_at
+                if e.status == EntryStatus.WAITING and ensure_utc(e.created_at) < ensure_utc(group.created_at)
             )
 
         # 予想待ち時間（1サイクル約10〜12分）

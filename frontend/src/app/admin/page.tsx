@@ -94,7 +94,7 @@ export default function AdminPage() {
         a.href = url;
         const now = new Date();
         const timestamp = now.toISOString().replace(/[-:T]/g, '').slice(0, 14);
-        a.download = `ovalant_entries_${timestamp}.csv`;
+        a.download = `overter_watch_2026_entries_${timestamp}.csv`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -155,7 +155,7 @@ export default function AdminPage() {
     a.href = url;
     const now = new Date();
     const timestamp = now.toISOString().replace(/[-:T]/g, '').slice(0, 14);
-    a.download = `ovalant_entries_history_${timestamp}.csv`;
+    a.download = `overter_watch_2026_entries_history_${timestamp}.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -518,7 +518,7 @@ export default function AdminPage() {
             <div className="flex items-center gap-3">
               <span className="w-1.5 h-6 bg-key-900 rounded-full inline-block shrink-0" aria-hidden="true" />
               <Heading size="20" className="font-bold text-solid-gray-900 leading-tight">
-                OVALANT 運営ダッシュボード
+                OVERTER WATCH2026 運営ダッシュボード
               </Heading>
               <StatusBadge variant="key" size="sm">
                 {isFetching ? '同期中...' : 'リアルタイム連携中'}

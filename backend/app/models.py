@@ -1,10 +1,11 @@
-"""Pydantic models and data structures for OVALANT matching system."""
+"""Pydantic models and data structures for OVERTER WATCH2026 matching system."""
 
 from __future__ import annotations
 from datetime import datetime
 from enum import Enum
 from typing import Optional
 from pydantic import BaseModel, Field, field_validator
+from .datetime_utils import now_utc, ensure_utc
 
 
 class PreferenceType(str, Enum):
@@ -46,8 +47,13 @@ class EntryGroup(BaseModel):
     status: EntryStatus = EntryStatus.WAITING
     assigned_match_id: Optional[str] = None
     skip_reason: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=now_utc)
+    updated_at: datetime = Field(default_factory=now_utc)
+
+    @field_validator("created_at", "updated_at", mode="before")
+    @classmethod
+    def normalize_entry_datetime(cls, v):
+        return ensure_utc(v)
 
 
 class TeamSideAssignment(BaseModel):
@@ -63,6 +69,10 @@ class MatchTeams(BaseModel):
     red: TeamSideAssignment
     blue: TeamSideAssignment
 
+    @property
+    def total_staff(self) -> int:
+        return self.red.staff_count + self.blue.staff_count
+
 
 class Match(BaseModel):
     """試合スロット（Current / Next / Next Next）"""
@@ -73,11 +83,21 @@ class Match(BaseModel):
     duration_minutes: int  # Open: 10分 / Closed: 8分
     assigned_groups: list[EntryGroup] = Field(default_factory=list)
     total_players: int = 0
-    total_staff: int = 0  # 運営スタッフ助っ人合計数
     teams: Optional[MatchTeams] = None
     started_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None
-    created_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=now_utc)
+
+    @field_validator("created_at", "started_at", "ended_at", mode="before")
+    @classmethod
+    def normalize_match_datetime(cls, v):
+        if v is None:
+            return None
+        return ensure_utc(v)
+
+    @property
+    def total_staff(self) -> int:
+        return self.teams.total_staff if self.teams else 0
 
 
 class SuggestionTip(BaseModel):

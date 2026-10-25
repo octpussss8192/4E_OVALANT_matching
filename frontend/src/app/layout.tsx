@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "OVALANT | 3v3 赤外線シューティング 対戦マッチング",
+  title: "OVERTER WATCH2026 | 3v3 赤外線シューティング 対戦マッチング",
   description: "デジタル庁デザインシステム準拠のリアルタイム対戦マッチング・会場案内システム",
 };
 

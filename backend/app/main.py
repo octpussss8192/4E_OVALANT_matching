@@ -1,11 +1,11 @@
-"""OVALANT 3v3 Matching System FastAPI Application."""
+"""OVERTER WATCH2026 3v3 Matching System FastAPI Application."""
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .api import router
 
 app = FastAPI(
-    title="OVALANT Matching API",
+    title="OVERTER WATCH2026 Matching API",
     description="3v3 IR Survival Game Realtime Matching & Queue Management System",
     version="1.0.0",
 )
@@ -24,4 +24,4 @@ app.include_router(router)
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "service": "ovalant-matching-backend"}
+    return {"status": "ok", "service": "overter-watch2026-backend"}

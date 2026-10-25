@@ -1,4 +1,4 @@
-"""FastAPI route handlers for OVALANT matching system."""
+"""FastAPI route handlers for OVERTER WATCH2026 matching system."""
 
 from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
@@ -219,7 +219,7 @@ def export_csv():
 
     csv_data = output.getvalue().encode("utf-8")
     now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"ovalant_entries_{now_str}.csv"
+    filename = f"overter_watch_2026_entries_{now_str}.csv"
 
     return Response(
         content=csv_data,
