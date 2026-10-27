@@ -22,7 +22,7 @@ export default function MonitorPage() {
 
     poll();
     // 定期ポーリング（フォールバック: 3秒間隔で高速同期）
-    const timer = setInterval(poll, 3000);
+    const timer = setInterval(poll, 15000);
     // Supabase Realtime イベントによる即時反映
     const unsubscribe = subscribeToMatchUpdates(() => {
       poll();

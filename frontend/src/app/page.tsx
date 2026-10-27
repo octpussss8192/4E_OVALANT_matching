@@ -202,7 +202,7 @@ export default function ParticipantPage() {
 
     refreshCookieEntries();
     poll();
-    const timer = setInterval(poll, 3000);
+    const timer = setInterval(poll, 15000);
     const unsubscribe = subscribeToMatchUpdates(() => {
       poll();
     });
