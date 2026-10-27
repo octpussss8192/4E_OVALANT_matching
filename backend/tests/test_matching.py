@@ -3,16 +3,21 @@
 import pytest
 from datetime import datetime, timedelta
 from fastapi.testclient import TestClient
+import backend.app.api as api_module
 from backend.app.main import app
 from backend.app.models import PreferenceType, MatchStatus, EntryStatus
 from backend.app.matching_engine import MatchingEngine
+
+# 本番Supabase連携を強制的に無効化
+api_module.engine.disable_supabase = True
 
 client = TestClient(app)
 
 
 @pytest.fixture(autouse=True)
 def reset_system_state():
-    """各テスト前にシステム状態をリセット"""
+    """各テスト前にシステム状態をリセット（テスト専用インメモリ環境）"""
+    api_module.engine.disable_supabase = True
     client.post("/api/admin/reset")
 
 
