@@ -104,6 +104,26 @@ def get_entry_status(entry_id: str):
     )
 
 
+@router.get("/entries/by-session/{session_id}", response_model=list[EntryResponse])
+def get_entries_by_session(session_id: str):
+    """端末の session_id に紐づく全エントリー（アクティブ順）を取得"""
+    engine.load_state()
+    results = []
+    matching_entries = [e for e in engine.entries if e.session_id == session_id]
+    for e in reversed(matching_entries):
+        status_info = engine.get_group_status(e.id)
+        if status_info:
+            results.append(
+                EntryResponse(
+                    entry=status_info["entry"],
+                    ahead_groups_count=status_info["ahead_groups_count"],
+                    estimated_wait_minutes=status_info["estimated_wait_minutes"],
+                    slot_name=status_info["slot_name"],
+                )
+            )
+    return results
+
+
 # --- スタッフ用 (Admin) 操作エンドポイント ---
 
 @router.post("/admin/sample-data", response_model=QueueStatusResponse)

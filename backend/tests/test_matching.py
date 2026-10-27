@@ -189,3 +189,12 @@ def test_multiple_entries_allowed():
     entry2 = r2.json()["entry"]
     assert entry1["id"] != entry2["id"]
     assert entry2["entry_number"] > entry1["entry_number"]
+
+    # session_id によるエントリー一覧逆引きテスト
+    r_list = client.get("/api/entries/by-session/same-device")
+    assert r_list.status_code == 200
+    session_entries = r_list.json()
+    assert len(session_entries) == 2
+    # 最新（2回目）が先頭に来ていること
+    assert session_entries[0]["entry"]["id"] == entry2["id"]
+    assert session_entries[1]["entry"]["id"] == entry1["id"]

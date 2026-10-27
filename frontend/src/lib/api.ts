@@ -47,6 +47,21 @@ export async function getQueueStatus(): Promise<QueueStatusResponse> {
   return res.json();
 }
 
+export async function getEntriesBySession(sessionId: string): Promise<EntryResponse[]> {
+  const apiBase = getApiBase();
+  try {
+    const res = await fetch(`${apiBase}/entries/by-session/${encodeURIComponent(sessionId)}`, {
+      cache: 'no-store',
+    });
+    if (!res.ok) {
+      return [];
+    }
+    return res.json();
+  } catch {
+    return [];
+  }
+}
+
 export async function getEntryStatus(entryId: string): Promise<EntryResponse> {
   const apiBase = getApiBase();
   const res = await fetch(`${apiBase}/entries/${entryId}`, {

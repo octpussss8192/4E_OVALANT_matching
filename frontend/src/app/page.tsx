@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import Link from 'next/link';
 import {
   Heading,
   Input,
@@ -28,13 +29,19 @@ import {
 } from '@/design-system';
 import { useSessionId } from '@/hooks/useSessionId';
 import { useWakeLock } from '@/hooks/useWakeLock';
-import { createEntry, getEntryStatus, getQueueStatus } from '@/lib/api';
+import {
+  createEntry,
+  getEntryStatus,
+  getQueueStatus,
+  getEntriesBySession,
+} from '@/lib/api';
 import { subscribeToMatchUpdates } from '@/lib/supabase';
 import {
   getMyEntries,
   saveMyEntry,
   getActiveEntryId,
   setActiveEntryId,
+  syncEntriesFromRemote,
   MyEntrySummary,
 } from '@/lib/entryCookie';
 import type { EntryResponse, QueueStatusResponse, PreferenceType } from '@/types';
@@ -49,6 +56,9 @@ export default function ParticipantPage() {
   const [preference, setPreference] = useState<PreferenceType>('open');
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // 初期化中フラグ（初回ロード時のフォームチラつき防止）
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
 
   // 参加者ステータス & 全体状況
   const [myEntryInfo, setMyEntryInfo] = useState<EntryResponse | null>(null);
@@ -74,42 +84,119 @@ export default function ParticipantPage() {
   const isCalled = myEntryInfo?.entry.status === 'called';
   useWakeLock(isCalled);
 
-  // Cookie から自端末のエントリーリストを同期
+  // URLパラメータに entry_id を反映（ブラウザ再読み込み・離脱後の復帰を強固にする）
+  const updateUrlEntryId = (id: string | null) => {
+    if (typeof window === 'undefined') return;
+    try {
+      const url = new URL(window.location.href);
+      if (id) {
+        if (url.searchParams.get('entry_id') !== id) {
+          url.searchParams.set('entry_id', id);
+          window.history.replaceState({}, '', url.toString());
+        }
+      } else {
+        if (url.searchParams.has('entry_id')) {
+          url.searchParams.delete('entry_id');
+          window.history.replaceState({}, '', url.toString());
+        }
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  // Cookie/Storage から自端末のエントリーリストを再同期
   const refreshCookieEntries = () => {
     const list = getMyEntries();
     setMyEntriesList(list);
     return list;
   };
 
+  // 自エントリー情報の復元・最新化処理（Cookie + URL + SessionId 3段フォールバック）
+  const fetchMyEntryData = useCallback(async (targetSessionId?: string) => {
+    const sid = targetSessionId || sessionId;
+    const activeId = getActiveEntryId();
+
+    // 1. 指定 ID の取得試行
+    if (activeId) {
+      try {
+        const entryData = await getEntryStatus(activeId);
+        setMyEntryInfo(entryData);
+        updateUrlEntryId(entryData.entry.id);
+        refreshCookieEntries();
+        return entryData;
+      } catch {
+        // 指定IDで見つからない場合はフォールバック
+      }
+    }
+
+    // 2. サーバーから session_id による逆引き復元
+    if (sid) {
+      try {
+        const sessionEntries = await getEntriesBySession(sid);
+        if (sessionEntries && sessionEntries.length > 0) {
+          syncEntriesFromRemote(
+            sessionEntries.map((e) => ({
+              id: e.entry.id,
+              entry_number: e.entry.entry_number,
+              team_name: e.entry.team_name,
+            }))
+          );
+          refreshCookieEntries();
+
+          // アクティブ（waiting/called/in_match）なエントリーを最優先
+          const activeEntry =
+            sessionEntries.find((e) =>
+              ['waiting', 'called', 'in_match'].includes(e.entry.status)
+            ) || sessionEntries[0];
+
+          setMyEntryInfo(activeEntry);
+          setActiveEntryId(activeEntry.entry.id);
+          updateUrlEntryId(activeEntry.entry.id);
+          return activeEntry;
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    // 3. ローカルリストの別エントリーを試行
+    const currentList = refreshCookieEntries();
+    if (currentList.length > 0) {
+      for (const item of currentList) {
+        if (item.id !== activeId) {
+          try {
+            const entryData = await getEntryStatus(item.id);
+            setMyEntryInfo(entryData);
+            setActiveEntryId(item.id);
+            updateUrlEntryId(item.id);
+            return entryData;
+          } catch {
+            // try next
+          }
+        }
+      }
+    }
+
+    return null;
+  }, [sessionId]);
+
   // リアルタイム反映 + 定期ポーリング (3秒毎)
   useEffect(() => {
+    let isMounted = true;
+
     const poll = async () => {
       try {
         const qStatus = await getQueueStatus();
+        if (!isMounted) return;
         setQueueState(qStatus);
         setIsOffline(false);
 
-        // Cookie/Storage に保存されたアクティブな自エントリーを追従
-        const activeId = getActiveEntryId();
-        if (activeId) {
-          try {
-            const entryData = await getEntryStatus(activeId);
-            setMyEntryInfo(entryData);
-          } catch {
-            // サーバー側で見つからない場合はCookieリストから更新
-            const currentList = refreshCookieEntries();
-            const nextAvailable = currentList.find((e) => e.id !== activeId);
-            if (nextAvailable) {
-              setActiveEntryId(nextAvailable.id);
-            } else {
-              setMyEntryInfo(null);
-            }
-          }
-        } else {
-          setMyEntryInfo(null);
-        }
+        await fetchMyEntryData();
       } catch {
-        setIsOffline(true);
+        if (isMounted) setIsOffline(true);
+      } finally {
+        if (isMounted) setIsInitialLoading(false);
       }
     };
 
@@ -121,18 +208,21 @@ export default function ParticipantPage() {
     });
 
     return () => {
+      isMounted = false;
       clearInterval(timer);
       unsubscribe();
     };
-  }, []);
+  }, [fetchMyEntryData]);
 
-  // 別の自エントリーに切り替え
+  // 別の自エントリーに手動切り替え
   const handleSelectEntry = async (id: string) => {
     setActiveEntryId(id);
+    updateUrlEntryId(id);
     setShowNewEntryForm(false);
     try {
       const entryData = await getEntryStatus(id);
       setMyEntryInfo(entryData);
+      refreshCookieEntries();
     } catch (err: any) {
       setErrorMessage(err.message || 'エントリー情報の取得に失敗しました');
     }
@@ -179,10 +269,11 @@ export default function ParticipantPage() {
         preference: headcount >= 4 ? 'closed' : preference,
       });
 
-      // Cookie に安全に保存（他人の整理券はアクセス不可）
+      // Cookie & Storage に安全に保存
       saveMyEntry(res.entry.id, res.entry.entry_number, res.entry.team_name);
       refreshCookieEntries();
       setMyEntryInfo(res);
+      updateUrlEntryId(res.entry.id);
       setShowNewEntryForm(false);
 
       // フォームをリセット
@@ -194,6 +285,10 @@ export default function ParticipantPage() {
       setSubmitting(false);
     }
   };
+
+  // 整理券の確認画面を表示中かどうか
+  const hasMyEntry = Boolean(myEntryInfo);
+  const isViewingTicket = hasMyEntry && !showNewEntryForm;
 
   return (
     <main className="min-h-screen bg-solid-gray-50 pb-16 text-solid-gray-900">
@@ -218,11 +313,24 @@ export default function ParticipantPage() {
               <p className="text-xs text-solid-gray-600">3v3 赤外線シューティング マッチング</p>
             </div>
           </div>
-          <Button asChild size="sm" variant="outline">
-            <a href="/monitor">
-              会場モニタ表示
-            </a>
-          </Button>
+          <div className="flex items-center gap-2">
+            {/* 整理券があるがフォームを開いている場合の「整理券へ」ヘッダーボタン */}
+            {(myEntryInfo || myEntriesList.length > 0) && showNewEntryForm && (
+              <Button
+                size="sm"
+                variant="solid-fill"
+                onClick={() => setShowNewEntryForm(false)}
+                className="font-bold text-xs"
+              >
+                整理券 #{myEntryInfo?.entry.entry_number || myEntriesList[0].entry_number} へ
+              </Button>
+            )}
+            <Button asChild size="sm" variant="outline">
+              <Link href="/monitor">
+                会場モニタ表示
+              </Link>
+            </Button>
+          </div>
         </div>
       </header>
 
@@ -238,8 +346,13 @@ export default function ParticipantPage() {
           </NotificationBanner>
         )}
 
-        {/* 状態に応じた画面表示 */}
-        {myEntryInfo && !showNewEntryForm ? (
+        {/* 初期ロード中インジケーター */}
+        {isInitialLoading && !myEntryInfo && myEntriesList.length === 0 ? (
+          <Card className="text-center py-12">
+            <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-solid-gray-300 border-t-key-900 mb-3" />
+            <p className="text-sm text-solid-gray-600 font-bold">整理券・エントリー情報を確認中…</p>
+          </Card>
+        ) : isViewingTicket && myEntryInfo ? (
           /* エントリー済: 待機または呼出中画面 */
           <div className="space-y-6">
             {/* 複数エントリーが存在する場合の自整理券切替バー */}
@@ -402,163 +515,237 @@ export default function ParticipantPage() {
               <Button
                 variant="outline"
                 size="md"
-                className="w-full justify-center"
+                className="w-full justify-center font-bold"
                 onClick={() => setShowNewEntryForm(true)}
               >
-                別のグループを新規エントリーする
+                + 別のグループを新規エントリーする
               </Button>
             </div>
           </div>
         ) : (
           /* 受付フォーム（未エントリー、または追加エントリー希望時） */
-          <Card>
-            <div className="flex items-center justify-between mb-4 pb-2 border-b border-solid-gray-200">
-              <Heading size="20" hasChip={true} className="font-bold">
-                マッチングエントリー登録
-              </Heading>
-              {myEntryInfo && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setShowNewEntryForm(false)}
-                >
-                  待機画面に戻る
-                </Button>
-              )}
-            </div>
+          <div className="space-y-6">
+            {/* ★ すでに発行済みの整理券がある場合の特大復帰カード ★ */}
+            {(myEntryInfo || myEntriesList.length > 0) && (
+              <div className="bg-key-50 border-2 border-key-900 rounded-8 p-4 shadow-sm space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className="w-3 h-3 rounded-full bg-key-900 animate-pulse shrink-0" />
+                    <div>
+                      <div className="font-bold text-sm text-key-900">
+                        すでに受付済みの整理券があります
+                      </div>
+                      <div className="text-xs text-solid-gray-700">
+                        {myEntryInfo ? (
+                          <>
+                            整理券 #{myEntryInfo.entry.entry_number} : {myEntryInfo.entry.team_name} (
+                            <span className="font-bold text-key-900">
+                              {myEntryInfo.entry.status === 'called' ? '呼出中！受付へ' : '待機中'}
+                            </span>
+                            )
+                          </>
+                        ) : (
+                          <>この端末で {myEntriesList.length} 件の整理券が登録されています</>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <Button
+                    size="md"
+                    variant="solid-fill"
+                    onClick={() => {
+                      setShowNewEntryForm(false);
+                      if (myEntryInfo) {
+                        updateUrlEntryId(myEntryInfo.entry.id);
+                      } else if (myEntriesList.length > 0) {
+                        handleSelectEntry(myEntriesList[0].id);
+                      }
+                    }}
+                    className="font-bold shrink-0 shadow text-sm"
+                  >
+                    整理券 #{myEntryInfo?.entry.entry_number || myEntriesList[0]?.entry_number} の確認画面へ移動 →
+                  </Button>
+                </div>
 
-            {errorMessage && (
-              <div className="mb-4">
-                <NotificationBanner
-                  bannerStyle="standard"
-                  type="error"
-                  title="入力エラー"
-                >
-                  <span className="text-sm">{errorMessage}</span>
-                </NotificationBanner>
+                {/* 複数ある場合の整理券ボタン一覧 */}
+                {myEntriesList.length > 1 && (
+                  <div className="pt-2 border-t border-key-200 flex gap-2 flex-wrap items-center">
+                    <span className="text-xs font-bold text-solid-gray-700">整理券切替:</span>
+                    {myEntriesList.map((item) => (
+                      <Button
+                        key={item.id}
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setShowNewEntryForm(false);
+                          handleSelectEntry(item.id);
+                        }}
+                      >
+                        #{item.entry_number} {item.team_name}
+                      </Button>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
-            <form onSubmit={handleFormSubmit} className="space-y-5">
-              {/* 代表者氏名 */}
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <Label htmlFor="leader-name" className="text-sm font-bold">代表者氏名</Label>
-                  <RequirementBadge>必須</RequirementBadge>
-                </div>
-                <Input
-                  id="leader-name"
-                  value={leaderName}
-                  onChange={(e) => setLeaderName(e.target.value)}
-                  required
-                  className="w-full"
-                />
-                <SupportText className="text-xs text-solid-gray-600 mt-1">
-                  受付呼出時にお呼びする氏名です
-                </SupportText>
+            <Card>
+              <div className="flex items-center justify-between mb-4 pb-2 border-b border-solid-gray-200">
+                <Heading size="20" hasChip={true} className="font-bold">
+                  {showNewEntryForm ? '追加グループのエントリー' : 'マッチングエントリー登録'}
+                </Heading>
+                {(myEntryInfo || myEntriesList.length > 0) && (
+                  <Button
+                    size="sm"
+                    variant="solid-fill"
+                    onClick={() => {
+                      setShowNewEntryForm(false);
+                      if (myEntryInfo) {
+                        updateUrlEntryId(myEntryInfo.entry.id);
+                      } else if (myEntriesList.length > 0) {
+                        handleSelectEntry(myEntriesList[0].id);
+                      }
+                    }}
+                    className="font-bold text-xs"
+                  >
+                    ← 整理券確認画面に戻る
+                  </Button>
+                )}
               </div>
 
-              {/* チーム名 */}
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <Label htmlFor="team-name" className="text-sm font-bold">チーム名</Label>
-                  <RequirementBadge>必須</RequirementBadge>
+              {errorMessage && (
+                <div className="mb-4">
+                  <NotificationBanner
+                    bannerStyle="standard"
+                    type="error"
+                    title="入力エラー"
+                  >
+                    <span className="text-sm">{errorMessage}</span>
+                  </NotificationBanner>
                 </div>
-                <Input
-                  id="team-name"
-                  value={teamName}
-                  onChange={(e) => setTeamName(e.target.value)}
-                  required
-                  className="w-full"
-                />
-                <SupportText className="text-xs text-solid-gray-600 mt-1">
-                  会場モニタに表示されるチーム名です
-                </SupportText>
-              </div>
+              )}
 
-              {/* 人数選択 */}
-              <fieldset>
-                <div className="flex items-center gap-2 mb-2">
-                  <legend className="text-sm font-bold text-solid-gray-900">参加人数 (1〜6名)</legend>
-                  <RequirementBadge>必須</RequirementBadge>
+              <form onSubmit={handleFormSubmit} className="space-y-5">
+                {/* 代表者氏名 */}
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <Label htmlFor="leader-name" className="text-sm font-bold">代表者氏名</Label>
+                    <RequirementBadge>必須</RequirementBadge>
+                  </div>
+                  <Input
+                    id="leader-name"
+                    value={leaderName}
+                    onChange={(e) => setLeaderName(e.target.value)}
+                    required
+                    className="w-full"
+                  />
+                  <SupportText className="text-xs text-solid-gray-600 mt-1">
+                    受付呼出時にお呼びする氏名です
+                  </SupportText>
                 </div>
-                <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-                  {[1, 2, 3, 4, 5, 6].map((num) => (
-                    <div
-                      key={num}
-                      className="border border-solid-gray-300 rounded-8 p-2 flex items-center justify-center min-h-touch bg-white"
-                    >
-                      <Radio
-                        name="headcount"
-                        value={num}
-                        checked={headcount === num}
-                        onChange={() => setHeadcount(num)}
-                        size="sm"
+
+                {/* チーム名 */}
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <Label htmlFor="team-name" className="text-sm font-bold">チーム名</Label>
+                    <RequirementBadge>必須</RequirementBadge>
+                  </div>
+                  <Input
+                    id="team-name"
+                    value={teamName}
+                    onChange={(e) => setTeamName(e.target.value)}
+                    required
+                    className="w-full"
+                  />
+                  <SupportText className="text-xs text-solid-gray-600 mt-1">
+                    会場モニタに表示されるチーム名です
+                  </SupportText>
+                </div>
+
+                {/* 人数選択 */}
+                <fieldset>
+                  <div className="flex items-center gap-2 mb-2">
+                    <legend className="text-sm font-bold text-solid-gray-900">参加人数 (1〜6名)</legend>
+                    <RequirementBadge>必須</RequirementBadge>
+                  </div>
+                  <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                    {[1, 2, 3, 4, 5, 6].map((num) => (
+                      <div
+                        key={num}
+                        className="border border-solid-gray-300 rounded-8 p-2 flex items-center justify-center min-h-touch bg-white"
                       >
-                        <span className="font-bold text-sm text-solid-gray-900">{num}名</span>
+                        <Radio
+                          name="headcount"
+                          value={num}
+                          checked={headcount === num}
+                          onChange={() => setHeadcount(num)}
+                          size="sm"
+                        >
+                          <span className="font-bold text-sm text-solid-gray-900">{num}名</span>
+                        </Radio>
+                      </div>
+                    ))}
+                  </div>
+                  <SupportText className="text-xs text-solid-gray-600 mt-1">
+                    4名以上のグループは友人が敵味方に分断されるのを防ぐため自動的に「貸切・身内戦」となります。
+                  </SupportText>
+                </fieldset>
+
+                {/* マッチング希望形式 */}
+                <fieldset>
+                  <div className="flex items-center gap-2 mb-2">
+                    <legend className="text-sm font-bold text-solid-gray-900">マッチング希望</legend>
+                    <RequirementBadge>必須</RequirementBadge>
+                  </div>
+                  <div className="space-y-3">
+                    <div className={`p-3 rounded-8 border border-solid-gray-300 bg-white ${headcount >= 4 ? 'opacity-50' : ''}`}>
+                      <Radio
+                        name="preference"
+                        value="open"
+                        checked={preference === 'open' && headcount <= 3}
+                        onChange={() => setPreference('open')}
+                        aria-disabled={headcount >= 4}
+                        size="md"
+                      >
+                        <span className="font-bold text-sm text-solid-gray-900">他グループと合流対戦 (Open)</span>
                       </Radio>
+                      <p className="text-xs text-solid-gray-600 mt-1 pl-10">
+                        他の来場者と3vs3でマッチング。試合時間 10分。マッチングが早くなる可能性があります。
+                      </p>
                     </div>
-                  ))}
-                </div>
-                <SupportText className="text-xs text-solid-gray-600 mt-1">
-                  4名以上のグループは友人が敵味方に分断されるのを防ぐため自動的に「貸切・身内戦」となります。
-                </SupportText>
-              </fieldset>
 
-              {/* マッチング希望形式 */}
-              <fieldset>
-                <div className="flex items-center gap-2 mb-2">
-                  <legend className="text-sm font-bold text-solid-gray-900">マッチング希望</legend>
-                  <RequirementBadge>必須</RequirementBadge>
-                </div>
-                <div className="space-y-3">
-                  <div className={`p-3 rounded-8 border border-solid-gray-300 bg-white ${headcount >= 4 ? 'opacity-50' : ''}`}>
-                    <Radio
-                      name="preference"
-                      value="open"
-                      checked={preference === 'open' && headcount <= 3}
-                      onChange={() => setPreference('open')}
-                      aria-disabled={headcount >= 4}
-                      size="md"
-                    >
-                      <span className="font-bold text-sm text-solid-gray-900">他グループと合流対戦 (Open)</span>
-                    </Radio>
-                    <p className="text-xs text-solid-gray-600 mt-1 pl-10">
-                      他の来場者と3vs3でマッチング。試合時間 10分。マッチングが早くなる可能性があります。
-                    </p>
+                    <div className="p-3 rounded-8 border border-solid-gray-300 bg-white">
+                      <Radio
+                        name="preference"
+                        value="closed"
+                        checked={preference === 'closed'}
+                        onChange={() => setPreference('closed')}
+                        size="md"
+                      >
+                        <span className="font-bold text-sm text-solid-gray-900">自分たちだけで貸切・身内戦 (Closed)</span>
+                      </Radio>
+                      <p className="text-xs text-solid-gray-600 mt-1 pl-10">
+                        他のグループと混ざらず対戦。試合時間 8分（少し短縮枠となります）。
+                      </p>
+                    </div>
                   </div>
+                </fieldset>
 
-                  <div className="p-3 rounded-8 border border-solid-gray-300 bg-white">
-                    <Radio
-                      name="preference"
-                      value="closed"
-                      checked={preference === 'closed'}
-                      onChange={() => setPreference('closed')}
-                      size="md"
-                    >
-                      <span className="font-bold text-sm text-solid-gray-900">自分たちだけで貸切・身内戦 (Closed)</span>
-                    </Radio>
-                    <p className="text-xs text-solid-gray-600 mt-1 pl-10">
-                      他のグループと混ざらず対戦。試合時間 8分（少し短縮枠となります）。
-                    </p>
-                  </div>
+                {/* 送信ボタン */}
+                <div className="pt-2">
+                  <Button
+                    type="submit"
+                    size="lg"
+                    variant="solid-fill"
+                    className="w-full justify-center min-h-touch text-base font-bold"
+                    aria-disabled={submitting}
+                  >
+                    {submitting ? 'エントリー送信中…' : 'エントリーを確定する'}
+                  </Button>
                 </div>
-              </fieldset>
-
-              {/* 送信ボタン */}
-              <div className="pt-2">
-                <Button
-                  type="submit"
-                  size="lg"
-                  variant="solid-fill"
-                  className="w-full justify-center min-h-touch text-base font-bold"
-                  aria-disabled={submitting}
-                >
-                  {submitting ? 'エントリー送信中…' : 'エントリーを確定する'}
-                </Button>
-              </div>
-            </form>
-          </Card>
+              </form>
+            </Card>
+          </div>
         )}
       </div>
 
