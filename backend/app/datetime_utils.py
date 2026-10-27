@@ -2,7 +2,7 @@
 
 import re
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Union
 
 
 def now_utc() -> datetime:
@@ -10,18 +10,20 @@ def now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def ensure_utc(dt: Optional[datetime]) -> datetime:
-    """Ensure a datetime object is timezone-aware in UTC.
+def ensure_utc(dt: Optional[Union[datetime, str]]) -> datetime:
+    """Ensure a datetime object or ISO string is timezone-aware in UTC.
     If naive, assume it represents UTC. If None, returns now_utc().
     """
     if dt is None:
         return now_utc()
+    if isinstance(dt, str):
+        return parse_iso_datetime(dt)
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt
 
 
-def parse_iso_datetime(dt_val: str | datetime | None) -> datetime:
+def parse_iso_datetime(dt_val: Union[str, datetime, None]) -> datetime:
     """Safely parse an ISO format datetime string into a UTC-aware datetime.
     Handles irregular microsecond digit lengths (e.g. 5 digits) for Python 3.10 compatibility,
     as well as 'Z' suffix.
@@ -29,7 +31,9 @@ def parse_iso_datetime(dt_val: str | datetime | None) -> datetime:
     if dt_val is None:
         return now_utc()
     if isinstance(dt_val, datetime):
-        return ensure_utc(dt_val)
+        if dt_val.tzinfo is None:
+            return dt_val.replace(tzinfo=timezone.utc)
+        return dt_val
 
     s = str(dt_val).strip()
     # Replace 'Z' with explicit UTC offset
@@ -40,7 +44,8 @@ def parse_iso_datetime(dt_val: str | datetime | None) -> datetime:
 
     try:
         dt = datetime.fromisoformat(s)
-        return ensure_utc(dt)
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt
     except Exception:
         return now_utc()
-

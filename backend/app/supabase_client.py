@@ -1,11 +1,11 @@
 """Supabase REST API client for OVERTER WATCH2026 backend.
-Enables real-time shared state across all Vercel Serverless Functions.
+Enables real-time shared state across all Vercel Serverless Functions
+with automatic stale-connection recovery and conflict resolution.
 """
 
 import os
 import time
 from typing import Optional, Any
-from datetime import datetime
 import httpx
 from .models import (
     EntryGroup,
@@ -52,7 +52,19 @@ class SupabaseStorage:
         self._client: Optional[httpx.Client] = None
 
     def is_configured(self) -> bool:
+        # 実行時にテスト環境変数がセットされた場合も確実にガードする
+        if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("TESTING") == "1":
+            return False
         return bool(self.url and self.key)
+
+    def _reset_client(self) -> None:
+        """Vercel Serverless のスリープ復帰時などに発生した古い（切断済み）TCP接続を破棄する"""
+        if self._client is not None:
+            try:
+                self._client.close()
+            except Exception:
+                pass
+            self._client = None
 
     def _get_client(self) -> httpx.Client:
         if self._client is None or self._client.is_closed:
@@ -67,26 +79,31 @@ class SupabaseStorage:
                 base_url=f"{self.url}/rest/v1",
                 headers=headers,
                 timeout=10.0,
+                limits=httpx.Limits(max_keepalive_connections=5, max_connections=10, keepalive_expiry=15.0),
             )
         return self._client
 
     def load_state(self) -> Optional[dict[str, Any]]:
         """Supabase から entries と matches を読み込んでインメモリ復元用 dict を返す。
-        接続瞬断・コールドスタート対策として最大2回試行する。
+        接続瞬断・コールドスタート・ゾンビソケット対策として、接続リフレッシュ付きで最大3回試行する。
         """
         if not self.is_configured():
             return None
 
-        for attempt in range(2):
+        for attempt in range(3):
             try:
                 client = self._get_client()
                 r_entries = client.get("/entries?select=*&order=entry_number.asc")
                 r_matches = client.get("/matches?select=*&order=match_number.asc")
 
                 if r_entries.status_code != 200 or r_matches.status_code != 200:
-                    print(f"[SupabaseStorage] load_state fetch error (attempt {attempt + 1}): entries={r_entries.status_code}, matches={r_matches.status_code}")
-                    if attempt == 0:
-                        time.sleep(0.3)
+                    print(
+                        f"[SupabaseStorage] load_state HTTP error (attempt {attempt + 1}): "
+                        f"entries={r_entries.status_code}, matches={r_matches.status_code}"
+                    )
+                    self._reset_client()
+                    if attempt < 2:
+                        time.sleep(0.25 * (attempt + 1))
                         continue
                     return None
 
@@ -138,6 +155,22 @@ class SupabaseStorage:
                         red_groups = [entries_by_id[gid] for gid in red_group_ids if gid in entries_by_id]
                         blue_groups = [entries_by_id[gid] for gid in blue_group_ids if gid in entries_by_id]
 
+                        # もし match_entries が欠落していた場合のフォールバック復元
+                        if not red_groups and not blue_groups and assigned_groups:
+                            if bool(m["is_closed_match"]):
+                                red_groups = list(assigned_groups)
+                            else:
+                                # Openマッチでリンクが未同期だった場合は assigned_groups から再構成
+                                cur_red: list[EntryGroup] = []
+                                cur_blue: list[EntryGroup] = []
+                                for ag in assigned_groups:
+                                    if sum(x.headcount for x in cur_red) + ag.headcount <= 3:
+                                        cur_red.append(ag)
+                                    else:
+                                        cur_blue.append(ag)
+                                red_groups = cur_red
+                                blue_groups = cur_blue
+
                         red_count = sum(g.headcount for g in red_groups)
                         blue_count = sum(g.headcount for g in blue_groups)
 
@@ -185,92 +218,189 @@ class SupabaseStorage:
                 }
             except Exception as e:
                 print(f"[SupabaseStorage] load_state exception (attempt {attempt + 1}): {e}")
-                if attempt == 0:
-                    time.sleep(0.3)
+                self._reset_client()
+                if attempt < 2:
+                    time.sleep(0.25 * (attempt + 1))
                     continue
                 return None
 
         return None
 
+    @staticmethod
+    def _entry_to_dict(e: EntryGroup, override_match_id: Optional[str] = "__KEEP__") -> dict[str, Any]:
+        match_id = e.assigned_match_id if override_match_id == "__KEEP__" else override_match_id
+        return {
+            "id": e.id,
+            "entry_number": e.entry_number,
+            "session_id": e.session_id,
+            "leader_name": e.leader_name,
+            "team_name": e.team_name,
+            "headcount": e.headcount,
+            "preference": e.preference.value,
+            "status": e.status.value,
+            "assigned_match_id": match_id,
+            "skip_reason": e.skip_reason,
+            "created_at": e.created_at.isoformat(),
+            "updated_at": e.updated_at.isoformat(),
+        }
+
+    @staticmethod
+    def _match_to_dict(m: Match) -> dict[str, Any]:
+        return {
+            "id": m.id,
+            "match_number": m.match_number,
+            "status": m.status.value,
+            "is_closed_match": m.is_closed_match,
+            "duration_minutes": m.duration_minutes,
+            "total_players": max(1, min(6, m.total_players)),  # CHECK制約 (1..6) 保護
+            "started_at": m.started_at.isoformat() if m.started_at else None,
+            "ended_at": m.ended_at.isoformat() if m.ended_at else None,
+            "created_at": m.created_at.isoformat(),
+        }
+
     def save_state(self, entries: list[EntryGroup], matches: list[Match]) -> bool:
-        """entries, matches, match_entries を Supabase に upsert 同期"""
+        """entries, matches, match_entries を Supabase に安全に upsert 同期する。
+        - サーバーレス複数インスタンス間での採番衝突（409 Conflict）発生時は自動で番号を再採番して保護する。
+        - 通信切断時はコネクションを張り直してリトライする。
+        """
         if not self.is_configured():
             return True
-        try:
-            entries_payload = [
-                {
-                    "id": e.id,
-                    "entry_number": e.entry_number,
-                    "session_id": e.session_id,
-                    "leader_name": e.leader_name,
-                    "team_name": e.team_name,
-                    "headcount": e.headcount,
-                    "preference": e.preference.value,
-                    "status": e.status.value,
-                    "assigned_match_id": e.assigned_match_id,
-                    "skip_reason": e.skip_reason,
-                    "created_at": e.created_at.isoformat(),
-                    "updated_at": e.updated_at.isoformat(),
-                }
-                for e in entries
-            ]
 
-            matches_payload = [
-                {
-                    "id": m.id,
-                    "match_number": m.match_number,
-                    "status": m.status.value,
-                    "is_closed_match": m.is_closed_match,
-                    "duration_minutes": m.duration_minutes,
-                    "total_players": m.total_players,
-                    "started_at": m.started_at.isoformat() if m.started_at else None,
-                    "ended_at": m.ended_at.isoformat() if m.ended_at else None,
-                    "created_at": m.created_at.isoformat(),
-                }
-                for m in matches
-            ]
+        for attempt in range(3):
+            try:
+                client = self._get_client()
 
-            links_payload = []
-            for m in matches:
-                if m.teams:
-                    for g in m.teams.red.groups:
-                        links_payload.append({
-                            "match_id": m.id,
-                            "entry_id": g.id,
-                            "team_side": "red",
-                        })
-                    for g in m.teams.blue.groups:
-                        links_payload.append({
-                            "match_id": m.id,
-                            "entry_id": g.id,
-                            "team_side": "blue",
-                        })
+                # --------------------------------------------------------------
+                # 1. matches の同期（409 番号衝突時は自動リナンバー）
+                # --------------------------------------------------------------
+                if matches:
+                    matches_payload = [self._match_to_dict(m) for m in matches]
+                    res_m = client.post("/matches?on_conflict=id", json=matches_payload)
 
-            client = self._get_client()
-            if matches_payload:
-                client.post("/matches?on_conflict=id", json=matches_payload)
+                    if res_m.status_code not in (200, 201):
+                        print(f"[SupabaseStorage] matches batch upsert returned {res_m.status_code}: {res_m.text}")
+                        # リモートの既存 match_number を確認して衝突解消
+                        r_rem_m = client.get("/matches?select=id,match_number")
+                        if r_rem_m.status_code == 200:
+                            rem_matches = r_rem_m.json()
+                            id_by_num = {int(rm["match_number"]): str(rm["id"]) for rm in rem_matches}
+                            max_m_num = max(id_by_num.keys(), default=0)
 
-            if entries_payload:
-                client.post("/entries?on_conflict=id", json=entries_payload)
+                            for m in matches:
+                                owner_id = id_by_num.get(m.match_number)
+                                if owner_id and owner_id != m.id:
+                                    max_m_num += 1
+                                    m.match_number = max_m_num
+                                    id_by_num[m.match_number] = m.id
 
-            if links_payload:
-                client.post("/match_entries?on_conflict=match_id,entry_id", json=links_payload)
+                            matches_payload = [self._match_to_dict(m) for m in matches]
+                            res_m2 = client.post("/matches?on_conflict=id", json=matches_payload)
+                            if res_m2.status_code not in (200, 201):
+                                # 1件ずつ個別保存で確実に通す
+                                for mp in matches_payload:
+                                    client.post("/matches?on_conflict=id", json=[mp])
 
-            return True
-        except Exception as e:
-            print(f"[SupabaseStorage] save_state exception: {e}")
-            return False
+                # --------------------------------------------------------------
+                # 2. entries の同期（409 整理券番号衝突・外部キー不整合の自動解決）
+                # --------------------------------------------------------------
+                if entries:
+                    entries_payload = [self._entry_to_dict(e) for e in entries]
+                    res_e = client.post("/entries?on_conflict=id", json=entries_payload)
+
+                    if res_e.status_code not in (200, 201):
+                        print(f"[SupabaseStorage] entries batch upsert returned {res_e.status_code}: {res_e.text}")
+                        # リモートの既存 entry_number と有効な match_id を確認して衝突解消
+                        r_rem_e = client.get("/entries?select=id,entry_number")
+                        r_rem_m = client.get("/matches?select=id")
+
+                        valid_match_ids = {m.id for m in matches}
+                        if r_rem_m.status_code == 200:
+                            valid_match_ids.update(str(rm["id"]) for rm in r_rem_m.json())
+
+                        if r_rem_e.status_code == 200:
+                            rem_entries = r_rem_e.json()
+                            id_by_enum = {int(re_item["entry_number"]): str(re_item["id"]) for re_item in rem_entries}
+                            max_e_num = max(id_by_enum.keys(), default=100)
+
+                            for e in entries:
+                                owner_id = id_by_enum.get(e.entry_number)
+                                if owner_id and owner_id != e.id:
+                                    max_e_num += 1
+                                    e.entry_number = max_e_num
+                                    id_by_enum[e.entry_number] = e.id
+
+                        # 外部キー保護付きでペイロード再生成
+                        safe_entries_payload = []
+                        for e in entries:
+                            safe_mid = e.assigned_match_id if (not e.assigned_match_id or e.assigned_match_id in valid_match_ids) else None
+                            safe_entries_payload.append(self._entry_to_dict(e, override_match_id=safe_mid))
+
+                        res_e2 = client.post("/entries?on_conflict=id", json=safe_entries_payload)
+                        if res_e2.status_code not in (200, 201):
+                            # 万が一まだ失敗する行があっても、他の予約者データを絶対に巻き込まないよう1件ずつ保存
+                            for ep in safe_entries_payload:
+                                r_single = client.post("/entries?on_conflict=id", json=[ep])
+                                if r_single.status_code not in (200, 201):
+                                    # assigned_match_id を外してでも予約者レコード自体は死守する
+                                    ep_fallback = dict(ep)
+                                    ep_fallback["assigned_match_id"] = None
+                                    client.post("/entries?on_conflict=id", json=[ep_fallback])
+
+                # --------------------------------------------------------------
+                # 3. match_entries の同期（古い編成リンクのクリーンアップ＋最新保存）
+                # --------------------------------------------------------------
+                links_payload = []
+                active_match_ids = []
+                for m in matches:
+                    if m.status in (MatchStatus.SCHEDULED, MatchStatus.CALLING, MatchStatus.IN_PROGRESS):
+                        active_match_ids.append(m.id)
+                    if m.teams:
+                        for g in m.teams.red.groups:
+                            links_payload.append({
+                                "match_id": m.id,
+                                "entry_id": g.id,
+                                "team_side": "red",
+                            })
+                        for g in m.teams.blue.groups:
+                            links_payload.append({
+                                "match_id": m.id,
+                                "entry_id": g.id,
+                                "team_side": "blue",
+                            })
+
+                # 再編成されたアクティブ試合の古いリンクを整理してから upsert
+                for mid in active_match_ids:
+                    client.delete(f"/match_entries?match_id=eq.{mid}")
+
+                if links_payload:
+                    res_l = client.post("/match_entries?on_conflict=match_id,entry_id", json=links_payload)
+                    if res_l.status_code not in (200, 201):
+                        for lp in links_payload:
+                            client.post("/match_entries?on_conflict=match_id,entry_id", json=[lp])
+
+                return True
+            except Exception as e:
+                print(f"[SupabaseStorage] save_state exception (attempt {attempt + 1}): {e}")
+                self._reset_client()
+                if attempt < 2:
+                    time.sleep(0.25 * (attempt + 1))
+                    continue
+                return False
+
+        return False
 
     def reset_all(self) -> bool:
-        """Supabase の全データを消去"""
+        """Supabase の全データを消去（管理者の明示的リセット操作時のみ呼出）"""
         if not self.is_configured():
             return True
-        try:
-            client = self._get_client()
-            client.delete("/match_entries?match_id=neq.00000000-0000-0000-0000-000000000000")
-            client.delete("/entries?id=neq.00000000-0000-0000-0000-000000000000")
-            client.delete("/matches?id=neq.00000000-0000-0000-0000-000000000000")
-            return True
-        except Exception as e:
-            print(f"[SupabaseStorage] reset_all exception: {e}")
-            return False
+        for attempt in range(2):
+            try:
+                client = self._get_client()
+                client.delete("/match_entries?match_id=neq.00000000-0000-0000-0000-000000000000")
+                client.delete("/entries?id=neq.00000000-0000-0000-0000-000000000000")
+                client.delete("/matches?id=neq.00000000-0000-0000-0000-000000000000")
+                return True
+            except Exception as e:
+                print(f"[SupabaseStorage] reset_all exception (attempt {attempt + 1}): {e}")
+                self._reset_client()
+        return False

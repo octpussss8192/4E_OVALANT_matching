@@ -53,30 +53,23 @@ class MatchingEngine:
         self.flexible_wait_seconds = flexible_wait_seconds
         self.storage_path = storage_path or _get_storage_path()
         self.disable_supabase = disable_supabase
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
         self.entries: list[EntryGroup] = []
         self.matches: list[Match] = []
         self.next_entry_number: int = 101
         self.next_match_number: int = 1
+        self._has_loaded_once: bool = False
 
         self.supabase = SupabaseStorage()
 
         self.load_state()
 
-    # --------------------------------------------------------------------------
-    # 永続化（Supabase 優先、ローカル JSON フォールバック）
-    # --------------------------------------------------------------------------
-    def save_state(self) -> None:
-        """状態保存"""
-        # 1. Supabase 同期
-        if not self.disable_supabase and self.supabase.is_configured():
-            try:
-                self.supabase.save_state(self.entries, self.matches)
-            except Exception as e:
-                print(f"[MatchingEngine] Supabase save error: {e}")
+    def _is_supabase_active(self) -> bool:
+        return not self.disable_supabase and self.supabase.is_configured()
 
-        # 2. ローカルディスクフォールバック
+    def _save_local_snapshot(self) -> None:
+        """ローカルディスクへのスナップショット保存"""
         try:
             self.storage_path.parent.mkdir(parents=True, exist_ok=True)
             temp_path = self.storage_path.with_suffix(".tmp")
@@ -92,22 +85,170 @@ class MatchingEngine:
         except Exception as e:
             print(f"[MatchingEngine] Failed to save state to {self.storage_path}: {e}")
 
-    def load_state(self) -> None:
-        """状態復元"""
+    def _reconcile_state(self) -> bool:
+        """サーバーレス複数インスタンス競合や通信途絶で生じた不整合（空の幽霊マッチや孤立エントリー）を自己修復する"""
+        healed = False
+        entries_by_id = {e.id: e for e in self.entries}
+
+        # 1. 各マッチの assigned_groups を最新の entries 実体に再紐付けし、グループ0件の幽霊アクティブ枠を無効化
+        for m in self.matches:
+            actual_groups = [
+                e for e in self.entries
+                if e.assigned_match_id == m.id and e.status not in (EntryStatus.SKIPPED, EntryStatus.CANCELLED)
+            ]
+            if m.status in (MatchStatus.SCHEDULED, MatchStatus.CALLING, MatchStatus.IN_PROGRESS):
+                if not actual_groups:
+                    m.status = MatchStatus.CANCELLED
+                    healed = True
+                else:
+                    m.assigned_groups = actual_groups
+                    if m.teams:
+                        red_ids = {g.id for g in m.teams.red.groups}
+                        blue_ids = {g.id for g in m.teams.blue.groups}
+                        m.teams.red.groups = [
+                            entries_by_id[gid] for gid in red_ids
+                            if gid in entries_by_id and entries_by_id[gid].assigned_match_id == m.id
+                        ]
+                        m.teams.blue.groups = [
+                            entries_by_id[gid] for gid in blue_ids
+                            if gid in entries_by_id and entries_by_id[gid].assigned_match_id == m.id
+                        ]
+
+        # 2. 同一スロット（IN_PROGRESS / CALLING / SCHEDULED）に複数マッチが重複存在する場合の正規化
+        for slot_status in (MatchStatus.IN_PROGRESS, MatchStatus.CALLING, MatchStatus.SCHEDULED):
+            slot_matches = [m for m in self.matches if m.status == slot_status]
+            if len(slot_matches) > 1:
+                for dup_match in slot_matches[1:]:
+                    dup_match.status = MatchStatus.CANCELLED
+                    for g in dup_match.assigned_groups:
+                        g.status = EntryStatus.WAITING
+                        g.assigned_match_id = None
+                    healed = True
+
+        # 3. 孤立エントリー（status が called/in_match なのに有効なアクティブ試合が存在しない等）の自己修復
+        active_matches_by_id = {
+            m.id: m for m in self.matches
+            if m.status in (MatchStatus.SCHEDULED, MatchStatus.CALLING, MatchStatus.IN_PROGRESS)
+        }
+        finished_match_ids = {m.id for m in self.matches if m.status == MatchStatus.FINISHED}
+
+        for e in self.entries:
+            if e.status in (EntryStatus.CALLED, EntryStatus.IN_MATCH):
+                if e.assigned_match_id and e.assigned_match_id in active_matches_by_id:
+                    active_m = active_matches_by_id[e.assigned_match_id]
+                    expected_status = (
+                        EntryStatus.IN_MATCH if active_m.status == MatchStatus.IN_PROGRESS else EntryStatus.CALLED
+                    )
+                    if e.status != expected_status:
+                        e.status = expected_status
+                        healed = True
+                elif e.assigned_match_id and e.assigned_match_id in finished_match_ids:
+                    e.status = EntryStatus.COMPLETED
+                    healed = True
+                else:
+                    # 割当先マッチがキャンセル・消失している場合は待機列（WAITING）へ安全に戻す
+                    e.status = EntryStatus.WAITING
+                    e.assigned_match_id = None
+                    healed = True
+            elif e.status == EntryStatus.WAITING and e.assigned_match_id is not None:
+                if e.assigned_match_id in active_matches_by_id:
+                    active_m = active_matches_by_id[e.assigned_match_id]
+                    e.status = (
+                        EntryStatus.IN_MATCH if active_m.status == MatchStatus.IN_PROGRESS else EntryStatus.CALLED
+                    )
+                else:
+                    e.assigned_match_id = None
+                healed = True
+
+        if healed:
+            self.recalculate_slots()
+
+        return healed
+
+    # --------------------------------------------------------------------------
+    # 永続化（Supabase 優先、通信エラー時の白紙巻き戻り防止ロック付き）
+    # --------------------------------------------------------------------------
+    def save_state(self) -> bool:
+        """状態保存"""
         with self._lock:
-            # 1. Supabase から復元
-            if not self.disable_supabase and self.supabase.is_configured():
+            ok = True
+            # 1. Supabase 同期
+            if self._is_supabase_active():
+                try:
+                    ok = self.supabase.save_state(self.entries, self.matches)
+                    # 自動リナンバーが行われた場合に備えて次番号を同期
+                    if self.entries:
+                        self.next_entry_number = max(
+                            self.next_entry_number,
+                            max(e.entry_number for e in self.entries) + 1,
+                        )
+                    if self.matches:
+                        self.next_match_number = max(
+                            self.next_match_number,
+                            max(m.match_number for m in self.matches) + 1,
+                        )
+                except Exception as e:
+                    print(f"[MatchingEngine] Supabase save error: {e}")
+                    ok = False
+
+            # 2. ローカルディスクスナップショット保存
+            self._save_local_snapshot()
+            return ok
+
+    def load_state(self, require_fresh: bool = False) -> bool:
+        """状態復元（Supabase 通信失敗時に空データや古いローカルファイルで上書きしない保護付き）"""
+        with self._lock:
+            # 1. Supabase が有効な環境（本番環境）
+            if self._is_supabase_active():
                 state = self.supabase.load_state()
-                if state:
+                if state is not None:
                     self.entries = state["entries"]
                     self.matches = state["matches"]
                     self.next_entry_number = state["next_entry_number"]
                     self.next_match_number = state["next_match_number"]
-                    return
+                    self._has_loaded_once = True
+                    # 万が一の不整合（幽霊マッチ・孤立エントリー）があれば自己修復
+                    if self._reconcile_state():
+                        self.supabase.save_state(self.entries, self.matches)
+                    # 正常取得できた最新状態をローカルスナップショットにも退避
+                    self._save_local_snapshot()
+                    return True
 
-            # 2. ローカルディスクフォールバック
+                # 書き込み系操作（require_fresh=True）の直前に Supabase 同期が失敗した場合は、
+                # 古いインメモリ状態で本番DBを上書きするのを防ぐため False（503）を返す
+                if require_fresh:
+                    print("[MatchingEngine] Fresh Supabase state required for write operation, but load_state failed.")
+                    return False
+
+                # 読み取り系操作で既にメモリ上にデータがあれば絶対に破棄・上書きせずそのまま維持する！
+                if self._has_loaded_once or self.entries:
+                    print("[MatchingEngine] Supabase load_state failed; preserving existing in-memory state.")
+                    return True
+
+                # コールドスタート直後でまだ一度も読めていない場合、ローカルスナップショットに非空データがあれば一時復元
+                if self.storage_path.exists():
+                    try:
+                        with open(self.storage_path, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                        loaded_entries = [EntryGroup.model_validate(e) for e in data.get("entries", [])]
+                        loaded_matches = [Match.model_validate(m) for m in data.get("matches", [])]
+                        if loaded_entries or loaded_matches:
+                            self.entries = loaded_entries
+                            self.matches = loaded_matches
+                            self.next_entry_number = data.get("next_entry_number", 101)
+                            self.next_match_number = data.get("next_match_number", 1)
+                            self._has_loaded_once = True
+                            self._reconcile_state()
+                            return True
+                    except Exception:
+                        pass
+
+                return False
+
+            # 2. ローカル専用モード（テスト環境・Supabase無効時）
             if not self.storage_path.exists():
-                return
+                self._has_loaded_once = True
+                return True
             try:
                 with open(self.storage_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
@@ -115,8 +256,12 @@ class MatchingEngine:
                 self.next_match_number = data.get("next_match_number", 1)
                 self.entries = [EntryGroup.model_validate(e) for e in data.get("entries", [])]
                 self.matches = [Match.model_validate(m) for m in data.get("matches", [])]
+                self._has_loaded_once = True
+                self._reconcile_state()
+                return True
             except Exception as e:
                 print(f"[MatchingEngine] Failed to load state from {self.storage_path}: {e}")
+                return False
 
     def reset(self) -> None:
         """システム全体の全データ初期化"""
@@ -125,7 +270,8 @@ class MatchingEngine:
             self.matches.clear()
             self.next_entry_number = 101
             self.next_match_number = 1
-            if not self.disable_supabase and self.supabase.is_configured():
+            self._has_loaded_once = True
+            if self._is_supabase_active():
                 self.supabase.reset_all()
             self.save_state()
 
