@@ -33,6 +33,11 @@ def get_supabase_config() -> tuple[str, str]:
         or os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
         or DEFAULT_SUPABASE_URL
     ).rstrip("/")
+
+    # タイポ（f と j）の自動補正ガード: 誤ったドメインが環境変数にあっても自動修復
+    if "wfvufsbcwelbkysrioxp" in url:
+        url = url.replace("wfvufsbcwelbkysrioxp", "wfvujsbcwelbkysrioxp")
+
     key = (
         os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
         or os.environ.get("SUPABASE_ANON_KEY")

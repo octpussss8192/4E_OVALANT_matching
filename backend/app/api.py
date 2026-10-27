@@ -241,3 +241,42 @@ def export_csv():
             "Cache-Control": "no-cache",
         },
     )
+
+
+@router.get("/health")
+def api_health_check():
+    """Vercel 本番環境での Supabase 接続状況をブラウザから一発診断"""
+    from .supabase_client import get_supabase_config
+    import httpx
+
+    url, key = get_supabase_config()
+    configured = bool(url and key)
+
+    status_result = "unknown"
+    db_entries_count = 0
+    error_detail = None
+
+    if configured:
+        try:
+            headers = {"apikey": key, "Authorization": f"Bearer {key}"}
+            with httpx.Client(base_url=f"{url}/rest/v1", headers=headers, timeout=5.0) as client:
+                res = client.get("/entries?select=id,entry_number")
+                if res.status_code == 200:
+                    status_result = "connected"
+                    db_entries_count = len(res.json())
+                else:
+                    status_result = f"http_{res.status_code}"
+                    error_detail = res.text
+        except Exception as e:
+            status_result = "connection_error"
+            error_detail = str(e)
+
+    return {
+        "status": "ok",
+        "supabase_connection": status_result,
+        "supabase_url": url,
+        "supabase_entries_count": db_entries_count,
+        "in_memory_entries_count": len(engine.entries),
+        "in_memory_matches_count": len(engine.matches),
+        "error_detail": error_detail,
+    }
