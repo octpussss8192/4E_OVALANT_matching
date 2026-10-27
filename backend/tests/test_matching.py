@@ -1,4 +1,4 @@
-"""Unit tests for OVALANT matching engine and API endpoints."""
+"""Unit tests for OVERTER WATCH2026 matching engine and API endpoints."""
 
 import pytest
 from datetime import datetime, timedelta
@@ -167,15 +167,20 @@ def test_flexible_5_player_fallback_after_waiting():
     assert match.teams.blue.total_count == 2
 
 
-def test_duplicate_session_blocking():
-    """同一 session_id による多重エントリーのブロック"""
-    client.post(
+def test_multiple_entries_allowed():
+    """同一 session_id による複数エントリーの許可（追加エントリー仕様）"""
+    r1 = client.post(
         "/api/entries",
         json={"session_id": "same-device", "leader_name": "初手", "team_name": "A", "headcount": 2, "preference": "open"},
     )
-    dup = client.post(
+    assert r1.status_code == 200
+    entry1 = r1.json()["entry"]
+
+    r2 = client.post(
         "/api/entries",
         json={"session_id": "same-device", "leader_name": "2回目", "team_name": "B", "headcount": 2, "preference": "open"},
     )
-    assert dup.status_code == 400
-    assert "既に有効なエントリーがあります" in dup.json()["detail"]
+    assert r2.status_code == 200
+    entry2 = r2.json()["entry"]
+    assert entry1["id"] != entry2["id"]
+    assert entry2["entry_number"] > entry1["entry_number"]

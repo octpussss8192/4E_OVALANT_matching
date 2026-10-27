@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { Card, NotificationBanner, Button, Heading, StatusBadge } from '@/design-system';
 import { getQueueStatus } from '@/lib/api';
 import { subscribeToMatchUpdates } from '@/lib/supabase';
@@ -44,7 +45,7 @@ export default function MonitorPage() {
         {match ? (
           <div className="flex-1 flex flex-col justify-between">
             <div>
-              {/* 試合番号 & 形式バッジ (原色の青太字を排除し、デジタル庁公式タイポグラフィに準拠) */}
+              {/* 試合番号 & 形式バッジ */}
               <div className="flex items-center justify-between pb-3 mb-4 border-b border-solid-gray-200">
                 <span className="text-xl font-bold text-solid-gray-900">
                   第 {match.match_number} 試合
@@ -117,7 +118,6 @@ export default function MonitorPage() {
                         {(match.teams.red.staff_count ?? 0) > 0 && (
                           <li className="py-2 px-2.5 my-1.5 rounded-6 bg-solid-gray-100 border border-solid-gray-300 flex justify-between items-center text-solid-gray-900">
                             <div className="flex items-center gap-1.5 font-bold text-xs text-solid-gray-800">
-                              <span>🛡️</span>
                               <span>運営スタッフ (助っ人参加)</span>
                             </div>
                             <span className="text-xs bg-solid-gray-800 text-white font-bold px-2 py-0.5 rounded-4">
@@ -161,7 +161,6 @@ export default function MonitorPage() {
                         {(match.teams.blue.staff_count ?? 0) > 0 && (
                           <li className="py-2 px-2.5 my-1.5 rounded-6 bg-solid-gray-100 border border-solid-gray-300 flex justify-between items-center text-solid-gray-900">
                             <div className="flex items-center gap-1.5 font-bold text-xs text-solid-gray-800">
-                              <span>🛡️</span>
                               <span>運営スタッフ (助っ人参加)</span>
                             </div>
                             <span className="text-xs bg-solid-gray-800 text-white font-bold px-2 py-0.5 rounded-4">
@@ -180,7 +179,7 @@ export default function MonitorPage() {
               <span>合計対戦人数: <strong className="text-solid-gray-900 font-bold">{match.total_players}名</strong></span>
               {(match.total_staff ?? 0) > 0 ? (
                 <span className="text-xs bg-solid-gray-200 text-solid-gray-800 font-bold px-2 py-0.5 rounded-4 border border-solid-gray-300">
-                  🛡️ スタッフ助っ人 {match.total_staff}名参加
+                  スタッフ助っ人 {match.total_staff}名参加
                 </span>
               ) : (
                 <span className="text-solid-gray-500 font-medium">受付完了済</span>
@@ -233,45 +232,31 @@ export default function MonitorPage() {
               </div>
             </div>
             <Button asChild size="sm" variant="outline">
-              <a href="/">
+              <Link href="/">
                 参加者エントリーへ
-              </a>
+              </Link>
             </Button>
           </div>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto p-6 md:p-8 w-full flex-1 flex flex-col space-y-6">
-        {/* サジェストTipsバナー (デジタル庁 NotificationBanner) */}
+      <main className="max-w-7xl mx-auto p-6 md:p-8 w-full space-y-6 flex-1">
+        {/* サジェストTipsバナー */}
         {queueState && (
           <NotificationBanner
             bannerStyle="standard"
             type="info1"
-            title="空き状況アナウンス"
+            title="リアルタイム案内"
           >
             <span className="text-sm font-medium">{queueState.suggestion_tip.message}</span>
           </NotificationBanner>
         )}
 
-        {/* 3スロット カラムグリッド */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 flex-1">
-          {/* 1. 現在対戦中 */}
-          {renderSlotCard(
-            queueState?.current_match ?? null,
-            '1. 現在対戦中'
-          )}
-
-          {/* 2. 次の試合 */}
-          {renderSlotCard(
-            queueState?.next_match ?? null,
-            '2. 次の試合'
-          )}
-
-          {/* 3. その次の試合 */}
-          {renderSlotCard(
-            queueState?.next_next_match ?? null,
-            '3. その次の試合'
-          )}
+        {/* 3スロット (対戦中 / 次の試合 / 次々回待機) */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-stretch">
+          {renderSlotCard(queueState?.current_match ?? null, '1. 現在対戦中 (フィールド案内済)')}
+          {renderSlotCard(queueState?.next_match ?? null, '2. 次の試合 (受付前集合・呼出中)')}
+          {renderSlotCard(queueState?.next_next_match ?? null, '3. その次の試合 (準備待機中)')}
         </div>
       </main>
     </div>

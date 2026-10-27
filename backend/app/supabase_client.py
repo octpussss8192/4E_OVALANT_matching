@@ -3,6 +3,7 @@ Enables real-time shared state across all Vercel Serverless Functions.
 """
 
 import os
+import time
 from typing import Optional, Any
 from datetime import datetime
 import httpx
@@ -57,123 +58,135 @@ class SupabaseStorage:
                 "Content-Type": "application/json",
                 "Prefer": "resolution=merge-duplicates",
             }
+            # Vercel Serverless のコールドスタート遅延を吸収するためタイムアウトを10秒に設定
             self._client = httpx.Client(
                 base_url=f"{self.url}/rest/v1",
                 headers=headers,
-                timeout=5.0,
+                timeout=10.0,
             )
         return self._client
 
     def load_state(self) -> Optional[dict[str, Any]]:
-        """Supabase から entries と matches を読み込んでインメモリ復元用 dict を返す"""
+        """Supabase から entries と matches を読み込んでインメモリ復元用 dict を返す。
+        接続瞬断・コールドスタート対策として最大2回試行する。
+        """
         if not self.is_configured():
             return None
 
-        try:
-            client = self._get_client()
-            r_entries = client.get("/entries?select=*&order=entry_number.asc")
-            r_matches = client.get("/matches?select=*&order=match_number.asc")
+        for attempt in range(2):
+            try:
+                client = self._get_client()
+                r_entries = client.get("/entries?select=*&order=entry_number.asc")
+                r_matches = client.get("/matches?select=*&order=match_number.asc")
 
-            if r_entries.status_code != 200 or r_matches.status_code != 200:
-                print(f"[SupabaseStorage] load_state fetch error: entries={r_entries.status_code}, matches={r_matches.status_code}")
+                if r_entries.status_code != 200 or r_matches.status_code != 200:
+                    print(f"[SupabaseStorage] load_state fetch error (attempt {attempt + 1}): entries={r_entries.status_code}, matches={r_matches.status_code}")
+                    if attempt == 0:
+                        time.sleep(0.3)
+                        continue
+                    return None
+
+                r_links = client.get("/match_entries?select=*")
+                raw_links = r_links.json() if r_links.status_code == 200 else []
+
+                raw_entries = r_entries.json()
+                raw_matches = r_matches.json()
+
+                # EntryGroup オブジェクトに復元
+                entries: list[EntryGroup] = []
+                for e in raw_entries:
+                    try:
+                        entries.append(
+                            EntryGroup(
+                                id=str(e["id"]),
+                                entry_number=int(e["entry_number"]),
+                                session_id=str(e["session_id"]),
+                                leader_name=str(e["leader_name"]),
+                                team_name=str(e["team_name"]),
+                                headcount=int(e["headcount"]),
+                                preference=PreferenceType(e["preference"]),
+                                status=EntryStatus(e["status"]),
+                                assigned_match_id=str(e["assigned_match_id"]) if e.get("assigned_match_id") else None,
+                                skip_reason=e.get("skip_reason"),
+                                created_at=parse_iso_datetime(e["created_at"]),
+                                updated_at=parse_iso_datetime(e["updated_at"]),
+                            )
+                        )
+                    except Exception as parse_err:
+                        print(f"[SupabaseStorage] Entry parse error: {parse_err}")
+
+                entries_by_id = {e.id: e for e in entries}
+
+                # Match オブジェクトに復元
+                matches: list[Match] = []
+                for m in raw_matches:
+                    try:
+                        m_id = str(m["id"])
+                        assigned_groups = [
+                            e for e in entries if e.assigned_match_id == m_id
+                        ]
+
+                        # チーム割り当ての復元
+                        m_links = [l for l in raw_links if str(l.get("match_id")) == m_id]
+                        red_group_ids = {str(l["entry_id"]) for l in m_links if l.get("team_side") == "red"}
+                        blue_group_ids = {str(l["entry_id"]) for l in m_links if l.get("team_side") == "blue"}
+
+                        red_groups = [entries_by_id[gid] for gid in red_group_ids if gid in entries_by_id]
+                        blue_groups = [entries_by_id[gid] for gid in blue_group_ids if gid in entries_by_id]
+
+                        red_count = sum(g.headcount for g in red_groups)
+                        blue_count = sum(g.headcount for g in blue_groups)
+
+                        teams = MatchTeams(
+                            red=TeamSideAssignment(
+                                team_side=TeamSideType.RED,
+                                groups=red_groups,
+                                total_count=red_count,
+                                staff_count=max(0, 3 - red_count) if not bool(m["is_closed_match"]) else 0,
+                            ),
+                            blue=TeamSideAssignment(
+                                team_side=TeamSideType.BLUE,
+                                groups=blue_groups,
+                                total_count=blue_count,
+                                staff_count=max(0, 3 - blue_count) if not bool(m["is_closed_match"]) else 0,
+                            ),
+                        )
+
+                        matches.append(
+                            Match(
+                                id=m_id,
+                                match_number=int(m["match_number"]),
+                                status=MatchStatus(m["status"]),
+                                is_closed_match=bool(m["is_closed_match"]),
+                                duration_minutes=int(m["duration_minutes"]),
+                                assigned_groups=assigned_groups,
+                                total_players=int(m["total_players"]),
+                                teams=teams,
+                                started_at=parse_iso_datetime(m["started_at"]) if m.get("started_at") else None,
+                                ended_at=parse_iso_datetime(m["ended_at"]) if m.get("ended_at") else None,
+                                created_at=parse_iso_datetime(m["created_at"]),
+                            )
+                        )
+                    except Exception as parse_err:
+                        print(f"[SupabaseStorage] Match parse error: {parse_err}")
+
+                next_entry_num = max([e.entry_number for e in entries], default=100) + 1
+                next_match_num = max([m.match_number for m in matches], default=0) + 1
+
+                return {
+                    "entries": entries,
+                    "matches": matches,
+                    "next_entry_number": next_entry_num,
+                    "next_match_number": next_match_num,
+                }
+            except Exception as e:
+                print(f"[SupabaseStorage] load_state exception (attempt {attempt + 1}): {e}")
+                if attempt == 0:
+                    time.sleep(0.3)
+                    continue
                 return None
 
-            r_links = client.get("/match_entries?select=*")
-            raw_links = r_links.json() if r_links.status_code == 200 else []
-
-            raw_entries = r_entries.json()
-            raw_matches = r_matches.json()
-
-            # EntryGroup オブジェクトに復元
-            entries: list[EntryGroup] = []
-            for e in raw_entries:
-                try:
-                    entries.append(
-                        EntryGroup(
-                            id=str(e["id"]),
-                            entry_number=int(e["entry_number"]),
-                            session_id=str(e["session_id"]),
-                            leader_name=str(e["leader_name"]),
-                            team_name=str(e["team_name"]),
-                            headcount=int(e["headcount"]),
-                            preference=PreferenceType(e["preference"]),
-                            status=EntryStatus(e["status"]),
-                            assigned_match_id=str(e["assigned_match_id"]) if e.get("assigned_match_id") else None,
-                            skip_reason=e.get("skip_reason"),
-                            created_at=parse_iso_datetime(e["created_at"]),
-                            updated_at=parse_iso_datetime(e["updated_at"]),
-                        )
-                    )
-                except Exception as parse_err:
-                    print(f"[SupabaseStorage] Entry parse error: {parse_err}")
-
-            entries_by_id = {e.id: e for e in entries}
-
-            # Match オブジェクトに復元
-            matches: list[Match] = []
-            for m in raw_matches:
-                try:
-                    m_id = str(m["id"])
-                    assigned_groups = [
-                        e for e in entries if e.assigned_match_id == m_id
-                    ]
-
-                    # チーム割り当ての復元
-                    m_links = [l for l in raw_links if str(l.get("match_id")) == m_id]
-                    red_group_ids = {str(l["entry_id"]) for l in m_links if l.get("team_side") == "red"}
-                    blue_group_ids = {str(l["entry_id"]) for l in m_links if l.get("team_side") == "blue"}
-
-                    red_groups = [entries_by_id[gid] for gid in red_group_ids if gid in entries_by_id]
-                    blue_groups = [entries_by_id[gid] for gid in blue_group_ids if gid in entries_by_id]
-
-                    red_count = sum(g.headcount for g in red_groups)
-                    blue_count = sum(g.headcount for g in blue_groups)
-
-                    teams = MatchTeams(
-                        red=TeamSideAssignment(
-                            team_side=TeamSideType.RED,
-                            groups=red_groups,
-                            total_count=red_count,
-                            staff_count=max(0, 3 - red_count) if not bool(m["is_closed_match"]) else 0,
-                        ),
-                        blue=TeamSideAssignment(
-                            team_side=TeamSideType.BLUE,
-                            groups=blue_groups,
-                            total_count=blue_count,
-                            staff_count=max(0, 3 - blue_count) if not bool(m["is_closed_match"]) else 0,
-                        ),
-                    )
-
-                    matches.append(
-                        Match(
-                            id=m_id,
-                            match_number=int(m["match_number"]),
-                            status=MatchStatus(m["status"]),
-                            is_closed_match=bool(m["is_closed_match"]),
-                            duration_minutes=int(m["duration_minutes"]),
-                            assigned_groups=assigned_groups,
-                            total_players=int(m["total_players"]),
-                            teams=teams,
-                            started_at=parse_iso_datetime(m["started_at"]) if m.get("started_at") else None,
-                            ended_at=parse_iso_datetime(m["ended_at"]) if m.get("ended_at") else None,
-                            created_at=parse_iso_datetime(m["created_at"]),
-                        )
-                    )
-                except Exception as parse_err:
-                    print(f"[SupabaseStorage] Match parse error: {parse_err}")
-
-            next_entry_num = max([e.entry_number for e in entries], default=100) + 1
-            next_match_num = max([m.match_number for m in matches], default=0) + 1
-
-            return {
-                "entries": entries,
-                "matches": matches,
-                "next_entry_number": next_entry_num,
-                "next_match_number": next_match_num,
-            }
-        except Exception as e:
-            print(f"[SupabaseStorage] load_state exception: {e}")
-            return None
+        return None
 
     def save_state(self, entries: list[EntryGroup], matches: list[Match]) -> bool:
         """entries, matches, match_entries を Supabase に upsert 同期"""

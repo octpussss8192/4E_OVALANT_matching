@@ -51,11 +51,13 @@ export default function AdminPage() {
   const [viewMode, setViewMode] = useState<'active' | 'history'>('active');
   const [isFetching, setIsFetching] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string>('');
+  const [fetchError, setFetchError] = useState(false);
 
   // 競合状態（Race Condition）防止用リクエストID
   const fetchRequestIdRef = useRef(0);
   const actionLoadingRef = useRef(false);
   const isFetchingRef = useRef(false);
+  const isIntentionalResetRef = useRef(false);
 
   // 不在スキップ確認モーダル用状態
   const [skipTarget, setSkipTarget] = useState<EntryGroup | null>(null);
@@ -80,7 +82,6 @@ export default function AdminPage() {
     }
 
     try {
-      // 1. バックエンドの最新エクスポートAPIを試行
       const apiBase =
         typeof window !== 'undefined'
           ? '/api'
@@ -111,7 +112,7 @@ export default function AdminPage() {
       console.warn('Backend export failed, falling back to client-side export:', e);
     }
 
-    // 2. バックエンドAPIが使えない場合のクライアント側Blobフォールバック
+    // クライアント側Blobフォールバック
     const list =
       queueState.all_history_entries && queueState.all_history_entries.length > 0
         ? queueState.all_history_entries
@@ -179,14 +180,32 @@ export default function AdminPage() {
 
     try {
       const data = await getQueueStatus();
-      // 最新のリクエストレスポンスのみを反映（古いレスポンスによる上書き巻き戻しを完全防止）
+      setFetchError(false);
+      // 最新のリクエストレスポンスのみを反映
       if (reqId === fetchRequestIdRef.current) {
-        setQueueState(data);
+        // 防振保護: 直前に複数件のエントリーがあり、意図的なリセットでないのに突然0件が返ってきた場合は、
+        // Vercel Serverless のコールドスタート遅延・Supabase一時瞬断と判断して既存画面を維持
+        setQueueState((prev) => {
+          const prevTotal =
+            (prev?.all_history_entries?.length ?? 0) ||
+            (prev?.all_active_entries?.length ?? 0);
+          const newTotal =
+            (data?.all_history_entries?.length ?? 0) ||
+            (data?.all_active_entries?.length ?? 0);
+
+          if (!isIntentionalResetRef.current && prevTotal > 0 && newTotal === 0) {
+            console.warn('[Admin] Suspicious empty response received while previous state had data. Keeping current state.');
+            return prev;
+          }
+          return data;
+        });
+
         const now = new Date();
         setLastUpdated(now.toLocaleTimeString('ja-JP'));
       }
     } catch (err) {
       console.error('Failed to fetch admin status:', err);
+      setFetchError(true);
     } finally {
       if (reqId === fetchRequestIdRef.current) {
         isFetchingRef.current = false;
@@ -198,13 +217,17 @@ export default function AdminPage() {
   useEffect(() => {
     fetchStatus(true);
 
-    // Supabase Realtime: データベースの更新 (entries / matches) を検知して即座に同期（タイマー不要で0秒反映）
+    // 4秒ごとの定期自動再同期（Supabase Realtime切断時のフォールバック）
+    const pollInterval = setInterval(() => {
+      fetchStatus(false);
+    }, 4000);
+
+    // Supabase Realtime: データベースの更新 (entries / matches) を検知して即座に同期
     const unsubscribe = subscribeToMatchUpdates(() => {
       fetchStatus(true);
     });
 
     // 画面アクティブ時同期: 他のタブやスリープから戻ってきた瞬間に即座に最新同期
-    // visibilitychange と focus の重複発火をデバウンス（300ms防振）して通信遅延を防止
     let debounceTimer: NodeJS.Timeout | null = null;
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
@@ -219,6 +242,7 @@ export default function AdminPage() {
     window.addEventListener('focus', handleVisibilityChange);
 
     return () => {
+      clearInterval(pollInterval);
       unsubscribe();
       if (debounceTimer) clearTimeout(debounceTimer);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
@@ -353,6 +377,7 @@ export default function AdminPage() {
   const handleConfirmReset = async () => {
     closeResetModal();
     actionLoadingRef.current = true;
+    isIntentionalResetRef.current = true;
     setActionLoading(true);
     setActionLoadingText('全データをリセット中...');
     try {
@@ -363,11 +388,12 @@ export default function AdminPage() {
         next_next_match: null,
         waiting_groups: [],
         all_active_entries: [],
+        all_history_entries: [],
         total_waiting_groups: 0,
         total_waiting_players: 0,
         suggestion_tip: {
           recommended_party_size: null,
-          message: '現在待機グループはいません',
+          message: '現在待機列なし。何名様でもすぐにご案内可能です。',
         },
       });
       setActionFeedback({
@@ -386,6 +412,9 @@ export default function AdminPage() {
       actionLoadingRef.current = false;
       setActionLoading(false);
       setActionLoadingText(null);
+      setTimeout(() => {
+        isIntentionalResetRef.current = false;
+      }, 5000);
     }
   };
 
@@ -454,7 +483,6 @@ export default function AdminPage() {
                 {(match.total_staff ?? 0) > 0 && (
                   <li className="py-2.5 px-3 my-1.5 rounded-6 bg-solid-gray-100 border border-solid-gray-300 flex items-center justify-between text-xs">
                     <div className="flex items-center gap-1.5 font-bold text-solid-gray-900">
-                      <span>🛡️</span>
                       <span>運営スタッフ助っ人補充</span>
                     </div>
                     <div className="flex items-center gap-1 text-[11px] font-bold">
@@ -478,6 +506,10 @@ export default function AdminPage() {
               {actionLoading ? (
                 <div className="flex items-center justify-center gap-2 text-solid-gray-700 font-semibold">
                   <Spinner className="size-4 text-key-900" /> スロット更新中...
+                </div>
+              ) : isFetching ? (
+                <div className="flex items-center justify-center gap-2 text-solid-gray-600">
+                  <Spinner className="size-4 text-key-900" /> 最新状況を確認中...
                 </div>
               ) : (
                 '枠は現在空いています'
@@ -520,9 +552,13 @@ export default function AdminPage() {
               <Heading size="20" className="font-bold text-solid-gray-900 leading-tight">
                 OVERTER WATCH2026 運営ダッシュボード
               </Heading>
-              <StatusBadge variant="key" size="sm">
-                {isFetching ? '同期中...' : 'リアルタイム連携中'}
-                {lastUpdated && <span className="text-white/80 ml-1">({lastUpdated})</span>}
+              <StatusBadge variant={fetchError ? 'error' : isFetching ? 'gray' : 'key'} size="sm">
+                {fetchError
+                  ? '通信再接続待機中'
+                  : isFetching
+                  ? '最新状況を読込み中...'
+                  : 'リアルタイム同期完了'}
+                {lastUpdated && <span className="opacity-90 ml-1">({lastUpdated})</span>}
               </StatusBadge>
             </div>
             <p className="text-xs text-solid-gray-600 mt-1 pl-4.5">
@@ -534,10 +570,15 @@ export default function AdminPage() {
               size="sm"
               variant="outline"
               onClick={() => fetchStatus(true)}
-              aria-disabled={actionLoading || isFetching}
+              aria-disabled={isFetching}
             >
-              {isFetching ? <Spinner className="size-3.5 mr-1" /> : '🔄 '}
-              手動更新
+              {isFetching ? (
+                <span className="flex items-center gap-1.5">
+                  <Spinner className="size-3.5" /> 読込み中...
+                </span>
+              ) : (
+                '手動更新'
+              )}
             </Button>
             <Button
               size="sm"
@@ -545,7 +586,7 @@ export default function AdminPage() {
               onClick={handleAddSampleGroups}
               aria-disabled={actionLoading}
             >
-              + テスト組投入
+              テスト組投入
             </Button>
             <Button
               size="sm"
@@ -562,7 +603,7 @@ export default function AdminPage() {
               variant="solid-fill"
             >
               <a href="/monitor" target="_blank" rel="noreferrer">
-                会場モニタ別窓 ↗
+                会場モニタ別窓
               </a>
             </Button>
           </div>
@@ -570,6 +611,17 @@ export default function AdminPage() {
       </header>
 
       <main className="max-w-7xl mx-auto p-6 md:p-8 w-full space-y-6 flex-1">
+        {/* 通信状態・読み込み中ステータスバナー */}
+        {isFetching && (
+          <div className="flex items-center justify-between px-4 py-2 bg-key-50 border border-key-200 rounded-8 text-xs text-key-900">
+            <div className="flex items-center gap-2">
+              <Spinner className="size-4 text-key-900" />
+              <span className="font-bold">データベース (Supabase) と最新状況を同期しています...</span>
+            </div>
+            <span className="text-[11px] text-solid-gray-600">画面データは自動更新されます</span>
+          </div>
+        )}
+
         {/* 操作フィードバック通知（デジタル庁公式 NotificationBanner） */}
         {actionFeedback && (
           <NotificationBanner
@@ -607,7 +659,7 @@ export default function AdminPage() {
               ? queueState.all_active_entries
               : (queueState?.waiting_groups ?? []);
 
-            // 進行中エントリーからは不在スキップ・対戦完了のグループを完全に除外
+            // 進行中エントリーからは不在スキップ・対戦完了のグループを除外
             const activeList = rawActive.filter(
               (g) => g.status !== 'skipped' && g.status !== 'completed'
             );
@@ -659,15 +711,15 @@ export default function AdminPage() {
                       onClick={handleExportCsv}
                       aria-disabled={!queueState || (historyList.length === 0 && activeList.length === 0)}
                     >
-                      📥 CSV出力
+                      CSV出力
                     </Button>
                   </div>
                 </div>
 
-                {!queueState || (displayGroups.length === 0 && isFetching) ? (
+                {!queueState && isFetching ? (
                   <div className="py-12 flex flex-col items-center justify-center gap-2 text-xs text-solid-gray-500">
                     <Spinner className="size-6 text-key-900" />
-                    <span>エントリー状況を取得・同期中...</span>
+                    <span>エントリー状況を読込み中...</span>
                   </div>
                 ) : displayGroups.length > 0 ? (
                   <div className="overflow-x-auto -mx-6 px-6 relative">
@@ -699,10 +751,10 @@ export default function AdminPage() {
                             statusLabel = '対戦中';
                             badgeVariant = 'key';
                           } else if (group.status === 'called') {
-                            if (group.assigned_match_id === queueState.next_match?.id) {
+                            if (group.assigned_match_id === queueState?.next_match?.id) {
                               statusLabel = '呼出中 (Next)';
                               badgeVariant = 'key';
-                            } else if (group.assigned_match_id === queueState.next_next_match?.id) {
+                            } else if (group.assigned_match_id === queueState?.next_next_match?.id) {
                               statusLabel = '次回呼出 (その次)';
                               badgeVariant = 'gray';
                             } else {
@@ -760,9 +812,16 @@ export default function AdminPage() {
                   </div>
                 ) : (
                   <div className="py-12 text-center text-xs text-solid-gray-500">
-                    {viewMode === 'active'
-                      ? '現在、進行中・待機中のグループはありません。'
-                      : '過去のエントリー履歴はありません。'}
+                    {isFetching ? (
+                      <div className="flex items-center justify-center gap-2">
+                        <Spinner className="size-4 text-key-900" />
+                        <span>最新エントリー状況を確認中...</span>
+                      </div>
+                    ) : viewMode === 'active' ? (
+                      '現在、進行中・待機中のグループはありません。'
+                    ) : (
+                      '過去のエントリー履歴はありません。'
+                    )}
                   </div>
                 )}
               </>
@@ -775,7 +834,7 @@ export default function AdminPage() {
           <ModalDialogContent className="max-w-md">
             <ModalDialogHeader>
               <ModalDialogHeading className="text-lg font-bold text-solid-gray-900">
-                ⚠️ 不在スキップの確認
+                不在スキップの確認
               </ModalDialogHeading>
               <ModalDialogClose onClick={closeSkipModal} />
             </ModalDialogHeader>
@@ -790,7 +849,7 @@ export default function AdminPage() {
                   </div>
                 )}
                 <p className="text-xs text-solid-gray-600 leading-relaxed">
-                  ※ スキップされたグループはキューから除外されます。
+                  スキップされたグループはキューから除外されます。
                   呼出中・対戦中の試合枠では、<strong>不足人数を運営スタッフが助っ人補充して試合枠を維持</strong>し、相手チームは待たされずに予定通り試合を開始できます。
                 </p>
               </div>
@@ -823,7 +882,7 @@ export default function AdminPage() {
           <ModalDialogContent className="max-w-md">
             <ModalDialogHeader>
               <ModalDialogHeading className="text-lg font-bold text-solid-gray-900">
-                ⚠️ 全データ初期化の確認
+                全データ初期化の確認
               </ModalDialogHeading>
               <ModalDialogClose onClick={closeResetModal} />
             </ModalDialogHeader>
@@ -833,7 +892,7 @@ export default function AdminPage() {
                   本当にすべての試合スロットおよび待機エントリーを初期化（空にリセット）しますか？
                 </p>
                 <p className="text-xs text-solid-gray-600 leading-relaxed">
-                  ※ 進行中の試合、呼出中・準備中の枠、待機キュー内のすべてのエントリー情報が削除されます。この操作は元に戻せません。
+                  進行中の試合、呼出中・準備中の枠、待機キュー内のすべてのエントリー情報が削除されます。この操作は元に戻せません。
                 </p>
               </div>
             </ModalDialogBody>

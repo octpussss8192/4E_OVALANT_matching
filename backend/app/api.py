@@ -23,25 +23,11 @@ engine = MatchingEngine(flexible_wait_seconds=600)
 @router.post("/entries", response_model=EntryResponse)
 def create_entry(req: CreateEntryRequest):
     """参加者エントリー受付
-    - 同一 session_id のアクティブな重複をブロック
+    - 同一 session_id からの複数エントリーも許可（警告確認はフロントエンドで実施）
     - 4〜6名は友人が敵味方に分断されるのを防ぐため自動的に Closed
     - 空きスロットがあればマッチング即時起動
     """
     engine.load_state()
-
-    # アクティブな重複エントリーの検査
-    active_entry = next(
-        (
-            e for e in engine.entries
-            if e.session_id == req.session_id and e.status in (EntryStatus.WAITING, EntryStatus.CALLED, EntryStatus.IN_MATCH)
-        ),
-        None,
-    )
-    if active_entry:
-        raise HTTPException(
-            status_code=400,
-            detail=f"既に有効なエントリーがあります (整理券番号 #{active_entry.entry_number})",
-        )
 
     entry = engine.register_entry(
         session_id=req.session_id,
@@ -99,7 +85,6 @@ def get_queue_status():
         all_active_entries=all_active_entries,
         all_history_entries=all_history_entries,
     )
-
 
 
 @router.get("/entries/{entry_id}", response_model=EntryResponse)
@@ -229,5 +214,3 @@ def export_csv():
             "Cache-Control": "no-cache",
         },
     )
-
-

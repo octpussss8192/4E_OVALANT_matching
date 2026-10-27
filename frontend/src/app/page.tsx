@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Heading,
   Input,
@@ -19,11 +19,24 @@ import {
   StepNavigationStepHeader,
   StepNavigationNumber,
   StepNavigationTitle,
+  ModalDialog,
+  ModalDialogContent,
+  ModalDialogHeader,
+  ModalDialogHeading,
+  ModalDialogClose,
+  ModalDialogBody,
 } from '@/design-system';
 import { useSessionId } from '@/hooks/useSessionId';
 import { useWakeLock } from '@/hooks/useWakeLock';
 import { createEntry, getEntryStatus, getQueueStatus } from '@/lib/api';
 import { subscribeToMatchUpdates } from '@/lib/supabase';
+import {
+  getMyEntries,
+  saveMyEntry,
+  getActiveEntryId,
+  setActiveEntryId,
+  MyEntrySummary,
+} from '@/lib/entryCookie';
 import type { EntryResponse, QueueStatusResponse, PreferenceType } from '@/types';
 
 export default function ParticipantPage() {
@@ -39,8 +52,16 @@ export default function ParticipantPage() {
 
   // 参加者ステータス & 全体状況
   const [myEntryInfo, setMyEntryInfo] = useState<EntryResponse | null>(null);
+  const [myEntriesList, setMyEntriesList] = useState<MyEntrySummary[]>([]);
   const [queueState, setQueueState] = useState<QueueStatusResponse | null>(null);
   const [isOffline, setIsOffline] = useState(false);
+
+  // 表示モード制御: 待機画面がある場合でも、新規受付フォームを開けるフラグ
+  const [showNewEntryForm, setShowNewEntryForm] = useState(false);
+
+  // 重複エントリー確認モーダル用
+  const [, setDuplicateModalOpen] = useState(false);
+  const duplicateDialogRef = useRef<HTMLDialogElement>(null);
 
   // 4名以上選択時は自動的に Closed に切り替え（味方は身内・敵は他人ルール）
   useEffect(() => {
@@ -53,34 +74,48 @@ export default function ParticipantPage() {
   const isCalled = myEntryInfo?.entry.status === 'called';
   useWakeLock(isCalled);
 
+  // Cookie から自端末のエントリーリストを同期
+  const refreshCookieEntries = () => {
+    const list = getMyEntries();
+    setMyEntriesList(list);
+    return list;
+  };
+
   // リアルタイム反映 + 定期ポーリング (3秒毎)
   useEffect(() => {
-    let timer: NodeJS.Timeout;
-
     const poll = async () => {
       try {
         const qStatus = await getQueueStatus();
         setQueueState(qStatus);
         setIsOffline(false);
 
-        // 自エントリーが保存されていれば最新状態を追従
-        const savedEntryId = localStorage.getItem('overter_watch_my_entry_id');
-        if (savedEntryId) {
+        // Cookie/Storage に保存されたアクティブな自エントリーを追従
+        const activeId = getActiveEntryId();
+        if (activeId) {
           try {
-            const entryData = await getEntryStatus(savedEntryId);
+            const entryData = await getEntryStatus(activeId);
             setMyEntryInfo(entryData);
           } catch {
-            localStorage.removeItem('overter_watch_my_entry_id');
-            setMyEntryInfo(null);
+            // サーバー側で見つからない場合はCookieリストから更新
+            const currentList = refreshCookieEntries();
+            const nextAvailable = currentList.find((e) => e.id !== activeId);
+            if (nextAvailable) {
+              setActiveEntryId(nextAvailable.id);
+            } else {
+              setMyEntryInfo(null);
+            }
           }
+        } else {
+          setMyEntryInfo(null);
         }
-      } catch (err) {
+      } catch {
         setIsOffline(true);
       }
     };
 
+    refreshCookieEntries();
     poll();
-    timer = setInterval(poll, 3000);
+    const timer = setInterval(poll, 3000);
     const unsubscribe = subscribeToMatchUpdates(() => {
       poll();
     });
@@ -91,8 +126,20 @@ export default function ParticipantPage() {
     };
   }, []);
 
-  // エントリー送信
-  const handleSubmit = async (e: React.FormEvent) => {
+  // 別の自エントリーに切り替え
+  const handleSelectEntry = async (id: string) => {
+    setActiveEntryId(id);
+    setShowNewEntryForm(false);
+    try {
+      const entryData = await getEntryStatus(id);
+      setMyEntryInfo(entryData);
+    } catch (err: any) {
+      setErrorMessage(err.message || 'エントリー情報の取得に失敗しました');
+    }
+  };
+
+  // エントリー送信前チェック（既に待機中エントリーがあれば警告モーダルを提示）
+  const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!sessionId) return;
     if (!leaderName.trim() || !teamName.trim()) {
@@ -100,8 +147,28 @@ export default function ParticipantPage() {
       return;
     }
 
+    // 既にアクティブな自エントリーが存在するか確認
+    const hasActiveEntry =
+      myEntryInfo &&
+      (myEntryInfo.entry.status === 'waiting' ||
+        myEntryInfo.entry.status === 'called' ||
+        myEntryInfo.entry.status === 'in_match');
+
+    if (hasActiveEntry) {
+      // 警告モーダルを開く
+      setDuplicateModalOpen(true);
+      duplicateDialogRef.current?.showModal();
+    } else {
+      executeCreateEntry();
+    }
+  };
+
+  // 実際のエントリー登録処理
+  const executeCreateEntry = async () => {
     setSubmitting(true);
     setErrorMessage(null);
+    duplicateDialogRef.current?.close();
+    setDuplicateModalOpen(false);
 
     try {
       const res = await createEntry({
@@ -111,8 +178,16 @@ export default function ParticipantPage() {
         headcount,
         preference: headcount >= 4 ? 'closed' : preference,
       });
+
+      // Cookie に安全に保存（他人の整理券はアクセス不可）
+      saveMyEntry(res.entry.id, res.entry.entry_number, res.entry.team_name);
+      refreshCookieEntries();
       setMyEntryInfo(res);
-      localStorage.setItem('overter_watch_my_entry_id', res.entry.id);
+      setShowNewEntryForm(false);
+
+      // フォームをリセット
+      setLeaderName('');
+      setTeamName('');
     } catch (err: any) {
       setErrorMessage(err.message || 'エントリーの送信に失敗しました');
     } finally {
@@ -126,7 +201,7 @@ export default function ParticipantPage() {
       {isOffline && (
         <div className="sticky top-0 z-50">
           <EmergencyBanner className="text-center font-bold">
-            ⚠️ サーバーとの通信が切断されました。自動再接続中…
+            サーバーとの通信が切断されました。自動再接続中…
           </EmergencyBanner>
         </div>
       )}
@@ -164,9 +239,33 @@ export default function ParticipantPage() {
         )}
 
         {/* 状態に応じた画面表示 */}
-        {myEntryInfo ? (
+        {myEntryInfo && !showNewEntryForm ? (
           /* エントリー済: 待機または呼出中画面 */
           <div className="space-y-6">
+            {/* 複数エントリーが存在する場合の自整理券切替バー */}
+            {myEntriesList.length > 1 && (
+              <div className="bg-white p-3 rounded-8 border border-solid-gray-300">
+                <div className="text-xs font-bold text-solid-gray-600 mb-2">
+                  この端末の整理券 ({myEntriesList.length}件):
+                </div>
+                <div className="flex gap-2 flex-wrap">
+                  {myEntriesList.map((item) => {
+                    const isSelected = item.id === myEntryInfo.entry.id;
+                    return (
+                      <Button
+                        key={item.id}
+                        size="sm"
+                        variant={isSelected ? 'solid-fill' : 'outline'}
+                        onClick={() => handleSelectEntry(item.id)}
+                      >
+                        #{item.entry_number} {item.team_name} {isSelected && '(表示中)'}
+                      </Button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* StepNavigation による進行状況ステップ表示 (デジタル庁公式コンポーネント) */}
             <div className="bg-white p-4 rounded-8 border border-solid-gray-300">
               <StepNavigation orientation="horizontal" size="small">
@@ -222,7 +321,7 @@ export default function ParticipantPage() {
                 <div className="mt-3 flex items-center justify-center">
                   {isCalled ? (
                     <StatusBadge variant="key" size="md">
-                      📢 呼出中 (受付へお越しください)
+                      呼出中 (受付へお越しください)
                     </StatusBadge>
                   ) : (
                     <StatusBadge variant="gray" size="md">
@@ -243,14 +342,14 @@ export default function ParticipantPage() {
                       title="受付呼出中"
                     >
                       <span className="font-bold text-sm">
-                        お待たせしました！受付スタッフへこの画面をお見せください。
+                        お待たせしました。受付スタッフへこの画面をお見せください。
                       </span>
                     </NotificationBanner>
                   </div>
                 )}
               </div>
 
-              {/* 定義リスト（dl/dt/dd）によるクリーンな情報表示（余計なグレータイルネストを解消） */}
+              {/* 定義リスト（dl/dt/dd）によるクリーンな情報表示 */}
               <dl className="border-t border-solid-gray-200 mt-4 pt-4 grid grid-cols-2 gap-4 text-center">
                 <div className="py-2">
                   <dt className="text-xs text-solid-gray-600">前の待機組数</dt>
@@ -297,13 +396,36 @@ export default function ParticipantPage() {
                 <li>「呼出中」の画面は消灯しないよう画面ロック防止機能が働きます。</li>
               </ul>
             </NotificationBanner>
+
+            {/* 新規グループ追加エントリーへの切り替えボタン */}
+            <div className="pt-2 text-center">
+              <Button
+                variant="outline"
+                size="md"
+                className="w-full justify-center"
+                onClick={() => setShowNewEntryForm(true)}
+              >
+                別のグループを新規エントリーする
+              </Button>
+            </div>
           </div>
         ) : (
-          /* 未エントリー: 受付フォーム */
+          /* 受付フォーム（未エントリー、または追加エントリー希望時） */
           <Card>
-            <Heading size="20" hasChip={true} className="mb-4 pb-2 border-b border-solid-gray-200 font-bold">
-              マッチングエントリー登録
-            </Heading>
+            <div className="flex items-center justify-between mb-4 pb-2 border-b border-solid-gray-200">
+              <Heading size="20" hasChip={true} className="font-bold">
+                マッチングエントリー登録
+              </Heading>
+              {myEntryInfo && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setShowNewEntryForm(false)}
+                >
+                  待機画面に戻る
+                </Button>
+              )}
+            </div>
 
             {errorMessage && (
               <div className="mb-4">
@@ -317,12 +439,12 @@ export default function ParticipantPage() {
               </div>
             )}
 
-            <form onSubmit={handleSubmit} className="space-y-5">
+            <form onSubmit={handleFormSubmit} className="space-y-5">
               {/* 代表者氏名 */}
               <div>
                 <div className="flex items-center gap-2 mb-1">
                   <Label htmlFor="leader-name" className="text-sm font-bold">代表者氏名</Label>
-                  <RequirementBadge>※必須</RequirementBadge>
+                  <RequirementBadge>必須</RequirementBadge>
                 </div>
                 <Input
                   id="leader-name"
@@ -340,7 +462,7 @@ export default function ParticipantPage() {
               <div>
                 <div className="flex items-center gap-2 mb-1">
                   <Label htmlFor="team-name" className="text-sm font-bold">チーム名</Label>
-                  <RequirementBadge>※必須</RequirementBadge>
+                  <RequirementBadge>必須</RequirementBadge>
                 </div>
                 <Input
                   id="team-name"
@@ -358,7 +480,7 @@ export default function ParticipantPage() {
               <fieldset>
                 <div className="flex items-center gap-2 mb-2">
                   <legend className="text-sm font-bold text-solid-gray-900">参加人数 (1〜6名)</legend>
-                  <RequirementBadge>※必須</RequirementBadge>
+                  <RequirementBadge>必須</RequirementBadge>
                 </div>
                 <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
                   {[1, 2, 3, 4, 5, 6].map((num) => (
@@ -379,7 +501,7 @@ export default function ParticipantPage() {
                   ))}
                 </div>
                 <SupportText className="text-xs text-solid-gray-600 mt-1">
-                  ※ 4名以上のグループは友人が敵味方に分断されるのを防ぐため自動的に「貸切・身内戦」となります。
+                  4名以上のグループは友人が敵味方に分断されるのを防ぐため自動的に「貸切・身内戦」となります。
                 </SupportText>
               </fieldset>
 
@@ -387,7 +509,7 @@ export default function ParticipantPage() {
               <fieldset>
                 <div className="flex items-center gap-2 mb-2">
                   <legend className="text-sm font-bold text-solid-gray-900">マッチング希望</legend>
-                  <RequirementBadge>※必須</RequirementBadge>
+                  <RequirementBadge>必須</RequirementBadge>
                 </div>
                 <div className="space-y-3">
                   <div className={`p-3 rounded-8 border border-solid-gray-300 bg-white ${headcount >= 4 ? 'opacity-50' : ''}`}>
@@ -439,6 +561,51 @@ export default function ParticipantPage() {
           </Card>
         )}
       </div>
+
+      {/* 重複エントリー確認モーダルダイアログ (デジタル庁公式コンポーネント) */}
+      <ModalDialog ref={duplicateDialogRef}>
+        <ModalDialogContent className="max-w-md">
+          <ModalDialogHeader>
+            <ModalDialogHeading className="text-lg font-bold text-solid-gray-900">
+              追加エントリーの確認
+            </ModalDialogHeading>
+            <ModalDialogClose onClick={() => duplicateDialogRef.current?.close()} />
+          </ModalDialogHeader>
+          <ModalDialogBody>
+            <div className="space-y-4 text-sm text-solid-gray-800">
+              <p>
+                現在、この端末には有効な整理券があります。
+              </p>
+              {myEntryInfo && (
+                <div className="p-3 bg-solid-gray-100 border border-solid-gray-300 rounded-8 font-bold text-xs text-solid-gray-900">
+                  整理券番号 #{myEntryInfo.entry.entry_number} : {myEntryInfo.entry.team_name} (代表: {myEntryInfo.entry.leader_name} / {myEntryInfo.entry.headcount}名)
+                </div>
+              )}
+              <p className="text-xs text-solid-gray-600">
+                別グループとして新たに追加エントリーを発行しますか？ 既存の整理券も保持され、後から切り替えて確認できます。
+              </p>
+              <div className="flex justify-end gap-3 pt-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => duplicateDialogRef.current?.close()}
+                  aria-disabled={submitting}
+                >
+                  キャンセル
+                </Button>
+                <Button
+                  size="sm"
+                  variant="solid-fill"
+                  onClick={executeCreateEntry}
+                  aria-disabled={submitting}
+                >
+                  {submitting ? '登録中…' : '追加エントリーを確定する'}
+                </Button>
+              </div>
+            </div>
+          </ModalDialogBody>
+        </ModalDialogContent>
+      </ModalDialog>
     </main>
   );
 }
