@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>MANUAL.md</title>
+<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+
+<style>
+/* https://github.com/microsoft/vscode/blob/master/extensions/markdown-language-features/media/markdown.css */
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+body {
+	font-family: var(--vscode-markdown-font-family, -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif);
+	font-size: var(--vscode-markdown-font-size, 14px);
+	padding: 0 26px;
+	line-height: var(--vscode-markdown-line-height, 22px);
+	word-wrap: break-word;
+}
+
+#code-csp-warning {
+	position: fixed;
+	top: 0;
+	right: 0;
+	color: white;
+	margin: 16px;
+	text-align: center;
+	font-size: 12px;
+	font-family: sans-serif;
+	background-color:#444444;
+	cursor: pointer;
+	padding: 6px;
+	box-shadow: 1px 1px 1px rgba(0,0,0,.25);
+}
+
+#code-csp-warning:hover {
+	text-decoration: none;
+	background-color:#007acc;
+	box-shadow: 2px 2px 2px rgba(0,0,0,.25);
+}
+
+body.scrollBeyondLastLine {
+	margin-bottom: calc(100vh - 22px);
+}
+
+body.showEditorSelection .code-line {
+	position: relative;
+}
+
+body.showEditorSelection .code-active-line:before,
+body.showEditorSelection .code-line:hover:before {
+	content: "";
+	display: block;
+	position: absolute;
+	top: 0;
+	left: -12px;
+	height: 100%;
+}
+
+body.showEditorSelection li.code-active-line:before,
+body.showEditorSelection li.code-line:hover:before {
+	left: -30px;
+}
+
+.vscode-light.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.15);
+}
+
+.vscode-light.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.40);
+}
+
+.vscode-light.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-dark.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.4);
+}
+
+.vscode-dark.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.60);
+}
+
+.vscode-dark.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-high-contrast.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 160, 0, 0.7);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 160, 0, 1);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+img {
+	max-width: 100%;
+	max-height: 100%;
+}
+
+a {
+	text-decoration: none;
+}
+
+a:hover {
+	text-decoration: underline;
+}
+
+a:focus,
+input:focus,
+select:focus,
+textarea:focus {
+	outline: 1px solid -webkit-focus-ring-color;
+	outline-offset: -1px;
+}
+
+hr {
+	border: 0;
+	height: 2px;
+	border-bottom: 2px solid;
+}
+
+h1 {
+	padding-bottom: 0.3em;
+	line-height: 1.2;
+	border-bottom-width: 1px;
+	border-bottom-style: solid;
+}
+
+h1, h2, h3 {
+	font-weight: normal;
+}
+
+table {
+	border-collapse: collapse;
+}
+
+table > thead > tr > th {
+	text-align: left;
+	border-bottom: 1px solid;
+}
+
+table > thead > tr > th,
+table > thead > tr > td,
+table > tbody > tr > th,
+table > tbody > tr > td {
+	padding: 5px 10px;
+}
+
+table > tbody > tr + tr > td {
+	border-top: 1px solid;
+}
+
+blockquote {
+	margin: 0 7px 0 5px;
+	padding: 0 16px 0 10px;
+	border-left-width: 5px;
+	border-left-style: solid;
+}
+
+code {
+	font-family: Menlo, Monaco, Consolas, "Droid Sans Mono", "Courier New", monospace, "Droid Sans Fallback";
+	font-size: 1em;
+	line-height: 1.357em;
+}
+
+body.wordWrap pre {
+	white-space: pre-wrap;
+}
+
+pre:not(.hljs),
+pre.hljs code > div {
+	padding: 16px;
+	border-radius: 3px;
+	overflow: auto;
+}
+
+pre code {
+	color: var(--vscode-editor-foreground);
+	tab-size: 4;
+}
+
+/** Theming */
+
+.vscode-light pre {
+	background-color: rgba(220, 220, 220, 0.4);
+}
+
+.vscode-dark pre {
+	background-color: rgba(10, 10, 10, 0.4);
+}
+
+.vscode-high-contrast pre {
+	background-color: rgb(0, 0, 0);
+}
+
+.vscode-high-contrast h1 {
+	border-color: rgb(0, 0, 0);
+}
+
+.vscode-light table > thead > tr > th {
+	border-color: rgba(0, 0, 0, 0.69);
+}
+
+.vscode-dark table > thead > tr > th {
+	border-color: rgba(255, 255, 255, 0.69);
+}
+
+.vscode-light h1,
+.vscode-light hr,
+.vscode-light table > tbody > tr + tr > td {
+	border-color: rgba(0, 0, 0, 0.18);
+}
+
+.vscode-dark h1,
+.vscode-dark hr,
+.vscode-dark table > tbody > tr + tr > td {
+	border-color: rgba(255, 255, 255, 0.18);
+}
+
+</style>
+
+<style>
+/* Tomorrow Theme */
+/* http://jmblog.github.com/color-themes-for-google-code-highlightjs */
+/* Original theme - https://github.com/chriskempson/tomorrow-theme */
+
+/* Tomorrow Comment */
+.hljs-comment,
+.hljs-quote {
+	color: #8e908c;
+}
+
+/* Tomorrow Red */
+.hljs-variable,
+.hljs-template-variable,
+.hljs-tag,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-regexp,
+.hljs-deletion {
+	color: #c82829;
+}
+
+/* Tomorrow Orange */
+.hljs-number,
+.hljs-built_in,
+.hljs-builtin-name,
+.hljs-literal,
+.hljs-type,
+.hljs-params,
+.hljs-meta,
+.hljs-link {
+	color: #f5871f;
+}
+
+/* Tomorrow Yellow */
+.hljs-attribute {
+	color: #eab700;
+}
+
+/* Tomorrow Green */
+.hljs-string,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-addition {
+	color: #718c00;
+}
+
+/* Tomorrow Blue */
+.hljs-title,
+.hljs-section {
+	color: #4271ae;
+}
+
+/* Tomorrow Purple */
+.hljs-keyword,
+.hljs-selector-tag {
+	color: #8959a8;
+}
+
+.hljs {
+	display: block;
+	overflow-x: auto;
+	color: #4d4d4c;
+	padding: 0.5em;
+}
+
+.hljs-emphasis {
+	font-style: italic;
+}
+
+.hljs-strong {
+	font-weight: bold;
+}
+</style>
+
+<style>
+/*
+ * Markdown PDF CSS
+ */
+
+ body {
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif, "Meiryo";
+	padding: 0 12px;
+}
+
+pre {
+	background-color: #f8f8f8;
+	border: 1px solid #cccccc;
+	border-radius: 3px;
+	overflow-x: auto;
+	white-space: pre-wrap;
+	overflow-wrap: break-word;
+}
+
+pre:not(.hljs) {
+	padding: 23px;
+	line-height: 19px;
+}
+
+blockquote {
+	background: rgba(127, 127, 127, 0.1);
+	border-color: rgba(0, 122, 204, 0.5);
+}
+
+.emoji {
+	height: 1.4em;
+}
+
+code {
+	font-size: 14px;
+	line-height: 19px;
+}
+
+/* for inline code */
+:not(pre):not(.hljs) > code {
+	color: #C9AE75; /* Change the old color so it seems less like an error */
+	font-size: inherit;
+}
+
+/* Page Break : use <div class="page"/> or <div class="page"></div> to insert page break
+-------------------------------------------------------- */
+.page {
+	page-break-after: always;
+}
+
+</style>
+
+<script src="https://unpkg.com/mermaid/dist/mermaid.min.js"></script>
+</head>
+<body>
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: document.body.classList.contains('vscode-dark') || document.body.classList.contains('vscode-high-contrast')
+          ? 'dark'
+          : 'default'
+    });
+  </script>
+<h1 id="overter-watch2026-運用マニュアル取扱説明書">OVERTER WATCH2026 運用マニュアル・取扱説明書</h1>
+<p>高専祭 3v3 赤外線シューティングゲーム「OVERTER WATCH2026」の予約・マッチングシステム取扱説明書です。<br>
+当日の受付・進行スタッフは、本書の内容を確認の上オペレーションを行ってください。</p>
+<hr>
+<h2 id="1-システム概要と3つの画面">1. システム概要と3つの画面</h2>
+<p>本システムは、用途に合わせて <strong>3つの画面</strong> に分かれています。</p>
+<table>
+<thead>
+<tr>
+<th style="text-align:left">画面名</th>
+<th style="text-align:left">URL</th>
+<th style="text-align:left">主な利用者</th>
+<th style="text-align:left">主な役割</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left"><strong>参加者画面</strong></td>
+<td style="text-align:left"><code>/</code></td>
+<td style="text-align:left">一般来場者（スマートフォン）</td>
+<td style="text-align:left">エントリー受付、整理券番号・呼出状況の確認</td>
+</tr>
+<tr>
+<td style="text-align:left"><strong>会場モニタ</strong></td>
+<td style="text-align:left"><code>/monitor</code></td>
+<td style="text-align:left">待機列・一般来場者（大型ディスプレイ）</td>
+<td style="text-align:left">現在対戦中・次回呼出・次々回準備枠の表示</td>
+</tr>
+<tr>
+<td style="text-align:left"><strong>運営ダッシュボード</strong></td>
+<td style="text-align:left"><code>/admin</code></td>
+<td style="text-align:left">受付・進行スタッフ（PCまたはiPad）</td>
+<td style="text-align:left">試合進行（案内完了・終了）、不在スキップ、復帰</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="2-当日の全体オペレーションの流れ">2. 当日の全体オペレーションの流れ</h2>
+<pre class="hljs"><code><div>[参加者] スマホで受付 → 整理券発行（待機中）
+                                ↓
+[モニタ] 試合スロットに自動割当（3. 次々回準備枠）
+                                ↓
+[モニタ] 呼出枠に昇格（2. 次の試合・受付呼出中）
+[参加者] スマホ画面が「呼出中」に変化 ＆ バイブレーション通知
+                                ↓
+[スタッフ] 参加者が受付に来たら画面を確認し「案内完了」を押す
+                                ↓
+[スタッフ] フィールドでの試合（8分または10分）
+                                ↓
+[スタッフ] 試合終了時に「試合終了」を押す（スロットが自動繰り上げ）
+</div></code></pre>
+<hr>
+<h2 id="3-参加者プレイヤーの画面とルール">3. 参加者（プレイヤー）の画面とルール</h2>
+<h3 id="-受付手順">① 受付手順</h3>
+<p>来場者は受付のQRコードをスマートフォンで読み取り、以下の情報を入力してエントリーします。</p>
+<ol>
+<li><strong>チーム名</strong></li>
+<li><strong>代表者名</strong></li>
+<li><strong>参加人数</strong>（1〜6名）</li>
+<li><strong>対戦モード</strong>（合流戦 / 貸切戦）</li>
+</ol>
+<blockquote>
+<p><strong>【人数の安心ルール（友だち分断防止）】</strong></p>
+<ul>
+<li><strong>4〜6名</strong>: 友だち同士で戦える「貸切戦（所要時間8分）」が自動選択されます。</li>
+<li><strong>1〜3名</strong>: 他のグループと組む「合流戦（所要時間10分）」または「少人数貸切戦」を選択できます。<br>
+※グループメンバーが敵味方に分断されることは絶対にありません。</li>
+</ul>
+</blockquote>
+<h3 id="-整理券画面のステータス変化">② 整理券画面のステータス変化</h3>
+<p>エントリーが完了すると、整理券番号が表示されます。</p>
+<ul>
+<li><strong>待機中</strong>: 前の待機組数と予想待ち時間が表示されます。</li>
+<li><strong>次々回 試合枠 (まもなく呼出)</strong>: 次の枠に入った合図です。受付付近へ移動を促します。</li>
+<li><strong>呼出中 (受付へお越しください)</strong>: 端末が1回振動し、画面が強調表示されます。画面消灯防止（WakeLock）が自動で働きます。</li>
+<li><strong>対戦中</strong>: フィールドへ入場中の状態です。</li>
+<li><strong>不在スキップ</strong>: 呼出時に不在だったため無効化された状態です。遅れて来場した場合は受付スタッフへ申し出るよう案内されます。</li>
+</ul>
+<p>※ブラウザを閉じたり誤って再読み込みした場合でも、再アクセスすれば同じ整理券画面が自動復元します。</p>
+<hr>
+<h2 id="4-会場モニタmonitorの設置と見方">4. 会場モニタ（<code>/monitor</code>）の設置と見方</h2>
+<p>会場のプロジェクターや大型液晶ディスプレイに全画面（F11キー）で表示しておきます。</p>
+<ul>
+<li><strong>1. 現在対戦中（左枠）</strong>: フィールド内で試合を行っているチーム名と整理券番号</li>
+<li><strong>2. 次の試合・呼出中（中央枠）</strong>: 受付に呼び出し中のチーム名</li>
+<li><strong>3. その次の試合（右枠）</strong>: まもなく呼出となる準備枠</li>
+<li><strong>助っ人表示</strong>: 奇数人数などでプレイヤーが不足する場合、システムが自動で「運営スタッフ助っ人」枠を割り当て、必ず 3 vs 3 の対戦が維持されます。</li>
+</ul>
+<hr>
+<h2 id="5-運営スタッフ画面adminの操作手順">5. 運営スタッフ画面（<code>/admin</code>）の操作手順</h2>
+<p>受付・進行席のPCまたはiPadで <code>/admin</code> を開きます。</p>
+<h3 id="基本操作ボタンを押すだけ">基本操作（ボタンを押すだけ）</h3>
+<h4 id="1-呼出中の参加者が受付に揃ったら">1. 呼出中の参加者が受付に揃ったら</h4>
+<p>👉 <strong>「案内完了」</strong> ボタンを押す</p>
+<ul>
+<li>呼出中だった枠が「現在対戦中」へ昇格します。</li>
+<li>参加者をフィールド内の装備・ブリーフィングエリアへご案内ください。</li>
+</ul>
+<h4 id="2-フィールド内の試合が終了したら">2. フィールド内の試合が終了したら</h4>
+<p>👉 <strong>「試合終了」</strong> ボタンを押す</p>
+<ul>
+<li>対戦中だった枠が「対戦完了」となり、フィールドが空きます。</li>
+<li>次の試合枠が自動的に繰り上がり、待機列から新しい対戦枠が自動編成されます。</li>
+</ul>
+<h4 id="3-呼出しても受付に来ない場合不在スキップ">3. 呼出しても受付に来ない場合（不在スキップ）</h4>
+<p>👉 該当グループの <strong>「不在スキップ」</strong> ボタンを押す</p>
+<ol>
+<li>確認モーダルダイアログが表示されます。チーム名と整理券番号を確認して「スキップを実行する」を押します。</li>
+<li>スキップされたグループは枠から除外されます。</li>
+<li><strong>相方グループの保護</strong>: 同じ枠にいた相手チームや相方グループは、待機列の最優先に戻るか、スタッフ助っ人を補充して枠が自動維持されます。</li>
+</ol>
+<hr>
+<h3 id="重要遅れて来場した参加者の復帰救済手順">【重要】遅れて来場した参加者の「復帰（救済）」手順</h3>
+<p>呼出時に不在で一度スキップされたグループが、「遅れてしまいましたが参加できますか？」と受付に来た場合の対応手順です。</p>
+<ol>
+<li>運営画面の下段にある <strong>「不在スキップ」</strong> タブ（または「全履歴」タブ）を開きます。</li>
+<li>該当する整理券番号を探します（ステータスが <code>不在スキップ</code> と赤く表示されています）。</li>
+<li>行の右端にある <strong>「復帰」</strong> ボタンを押します。</li>
+<li>確認モーダルダイアログが表示されるので、<strong>「待機列に復帰させる」</strong> を押します。</li>
+<li>👉 <strong>復帰完了</strong>: そのグループは**待機列の先頭（最優先）**に差し戻され、次の空き枠に最優先で割り当てられます。参加者には「まもなくお呼び出ししますので、受付付近でお待ちください」とお伝えください。</li>
+</ol>
+<blockquote>
+<p><strong>※二重エントリー防止ガード</strong><br>
+参加者がスキップ後にすでにスマホから新しい整理券を取り直していた場合、復帰ボタンを押すと「同一参加者が既に整理券 #XXX で受付中のため復帰できません」と警告され、二重エントリーが自動的に防止されます。</p>
+</blockquote>
+<hr>
+<h3 id="その他の管理機能">その他の管理機能</h3>
+<ul>
+<li><strong>CSVエクスポート</strong>:<br>
+上部の「CSV出力」ボタンを押すと、本日の全エントリー履歴（整理券番号、チーム名、代表者名、人数、受付時刻、完了ステータス等）をExcel対応UTF-8（BOM付き）でダウンロードできます。</li>
+<li><strong>全データ初期化（全リセット）</strong>:<br>
+朝の準備・リハーサル終了後、本番開始前にデータをゼロに戻す場合は「全リセット」を押します（確認ダイアログが出ます）。</li>
+</ul>
+<hr>
+<h2 id="6-よくある質問トラブルシューティング">6. よくある質問・トラブルシューティング</h2>
+<h3 id="q1-呼んでも誰も来ない場合はどうすればいいですか">Q1. 呼んでも誰も来ない場合はどうすればいいですか？</h3>
+<p><strong>A.</strong> 「不在スキップ」を押してください。枠に残された他のグループは待機列の最優先に戻るため、不公平なく次の試合に案内されます。</p>
+<h3 id="q2-スキップした後に遅れましたと本人が来ました">Q2. スキップした後に「遅れました」と本人が来ました。</h3>
+<p><strong>A.</strong> 運営画面下段の「不在スキップ」タブから、該当チームの「復帰」ボタンを押してください。待機列の先頭に戻り、次の枠ですぐに呼び出されます。</p>
+<h3 id="q3-3人チーム-vs-2人チームで人数が合わない場合は">Q3. 3人チーム vs 2人チームで人数が合わない場合は？</h3>
+<p><strong>A.</strong> そのままで大丈夫です。システムが自動で「運営スタッフ助っ人」を1名割り当て、3 vs 3 の試合として進行します。受付スタッフ1名が助っ人として銃を持ってご参加ください。</p>
+<h3 id="q4-参加者が誤ってスマホのブラウザを閉じてしまいました">Q4. 参加者が誤ってスマホのブラウザを閉じてしまいました。</h3>
+<p><strong>A.</strong> もう一度同じ受付QRコードを読み込むかURLを開いてもらってください。端末に保存されたセッション情報から、元の整理券画面が自動的に再表示されます。</p>
+<h3 id="q5-参加者のスマホが電波不良充電切れになりました">Q5. 参加者のスマホが電波不良・充電切れになりました。</h3>
+<p><strong>A.</strong> 運営画面（<code>/admin</code>）の全エントリー一覧から代表者名で検索し、整理券番号をお伝えください。口頭呼出でそのまま対戦へご案内可能です。</p>
+<hr>
+<h2 id="7-事前テストリハーサル手順ローカル環境">7. 事前テスト・リハーサル手順（ローカル環境）</h2>
+<p>本番データベースに接続せず、PC単体で安全に動作確認を行う手順です。</p>
+<h3 id="バックエンド起動ローカルモード">バックエンド起動（ローカルモード）</h3>
+<pre class="hljs"><code><div><span class="hljs-variable">$env:LOCAL_MODE</span>=<span class="hljs-string">&quot;1&quot;</span>
+<span class="hljs-variable">$env:USE_LOCAL_STORAGE</span>=<span class="hljs-string">&quot;true&quot;</span>
+<span class="hljs-variable">$env:PYTHONIOENCODING</span>=<span class="hljs-string">&quot;utf-8&quot;</span>
+python <span class="hljs-literal">-m</span> uvicorn backend.app.main:app <span class="hljs-literal">--host</span> <span class="hljs-number">127.0</span>.<span class="hljs-number">0.1</span> <span class="hljs-literal">--port</span> <span class="hljs-number">8000</span>
+</div></code></pre>
+<p>※画面上部に「ローカル検証モード (本番DB保護中)」と表示され、本番DBには一切書き込まれません。</p>
+<h3 id="フロントエンド起動">フロントエンド起動</h3>
+<p>別ターミナルで実行：</p>
+<pre class="hljs"><code><div><span class="hljs-built_in">cd</span> frontend
+npm run dev
+</div></code></pre>
+<p>ブラウザで <code>http://localhost:3000</code>（参加者）、<code>http://localhost:3000/admin</code>（運営）、<code>http://localhost:3000/monitor</code>（モニタ）を開いてテストできます。</p>
+
+</body>
+</html>

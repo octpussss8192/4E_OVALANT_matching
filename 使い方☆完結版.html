@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>使い方☆完結版.md</title>
+<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+
+<style>
+/* https://github.com/microsoft/vscode/blob/master/extensions/markdown-language-features/media/markdown.css */
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+body {
+	font-family: var(--vscode-markdown-font-family, -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif);
+	font-size: var(--vscode-markdown-font-size, 14px);
+	padding: 0 26px;
+	line-height: var(--vscode-markdown-line-height, 22px);
+	word-wrap: break-word;
+}
+
+#code-csp-warning {
+	position: fixed;
+	top: 0;
+	right: 0;
+	color: white;
+	margin: 16px;
+	text-align: center;
+	font-size: 12px;
+	font-family: sans-serif;
+	background-color:#444444;
+	cursor: pointer;
+	padding: 6px;
+	box-shadow: 1px 1px 1px rgba(0,0,0,.25);
+}
+
+#code-csp-warning:hover {
+	text-decoration: none;
+	background-color:#007acc;
+	box-shadow: 2px 2px 2px rgba(0,0,0,.25);
+}
+
+body.scrollBeyondLastLine {
+	margin-bottom: calc(100vh - 22px);
+}
+
+body.showEditorSelection .code-line {
+	position: relative;
+}
+
+body.showEditorSelection .code-active-line:before,
+body.showEditorSelection .code-line:hover:before {
+	content: "";
+	display: block;
+	position: absolute;
+	top: 0;
+	left: -12px;
+	height: 100%;
+}
+
+body.showEditorSelection li.code-active-line:before,
+body.showEditorSelection li.code-line:hover:before {
+	left: -30px;
+}
+
+.vscode-light.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.15);
+}
+
+.vscode-light.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.40);
+}
+
+.vscode-light.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-dark.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.4);
+}
+
+.vscode-dark.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.60);
+}
+
+.vscode-dark.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-high-contrast.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 160, 0, 0.7);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 160, 0, 1);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+img {
+	max-width: 100%;
+	max-height: 100%;
+}
+
+a {
+	text-decoration: none;
+}
+
+a:hover {
+	text-decoration: underline;
+}
+
+a:focus,
+input:focus,
+select:focus,
+textarea:focus {
+	outline: 1px solid -webkit-focus-ring-color;
+	outline-offset: -1px;
+}
+
+hr {
+	border: 0;
+	height: 2px;
+	border-bottom: 2px solid;
+}
+
+h1 {
+	padding-bottom: 0.3em;
+	line-height: 1.2;
+	border-bottom-width: 1px;
+	border-bottom-style: solid;
+}
+
+h1, h2, h3 {
+	font-weight: normal;
+}
+
+table {
+	border-collapse: collapse;
+}
+
+table > thead > tr > th {
+	text-align: left;
+	border-bottom: 1px solid;
+}
+
+table > thead > tr > th,
+table > thead > tr > td,
+table > tbody > tr > th,
+table > tbody > tr > td {
+	padding: 5px 10px;
+}
+
+table > tbody > tr + tr > td {
+	border-top: 1px solid;
+}
+
+blockquote {
+	margin: 0 7px 0 5px;
+	padding: 0 16px 0 10px;
+	border-left-width: 5px;
+	border-left-style: solid;
+}
+
+code {
+	font-family: Menlo, Monaco, Consolas, "Droid Sans Mono", "Courier New", monospace, "Droid Sans Fallback";
+	font-size: 1em;
+	line-height: 1.357em;
+}
+
+body.wordWrap pre {
+	white-space: pre-wrap;
+}
+
+pre:not(.hljs),
+pre.hljs code > div {
+	padding: 16px;
+	border-radius: 3px;
+	overflow: auto;
+}
+
+pre code {
+	color: var(--vscode-editor-foreground);
+	tab-size: 4;
+}
+
+/** Theming */
+
+.vscode-light pre {
+	background-color: rgba(220, 220, 220, 0.4);
+}
+
+.vscode-dark pre {
+	background-color: rgba(10, 10, 10, 0.4);
+}
+
+.vscode-high-contrast pre {
+	background-color: rgb(0, 0, 0);
+}
+
+.vscode-high-contrast h1 {
+	border-color: rgb(0, 0, 0);
+}
+
+.vscode-light table > thead > tr > th {
+	border-color: rgba(0, 0, 0, 0.69);
+}
+
+.vscode-dark table > thead > tr > th {
+	border-color: rgba(255, 255, 255, 0.69);
+}
+
+.vscode-light h1,
+.vscode-light hr,
+.vscode-light table > tbody > tr + tr > td {
+	border-color: rgba(0, 0, 0, 0.18);
+}
+
+.vscode-dark h1,
+.vscode-dark hr,
+.vscode-dark table > tbody > tr + tr > td {
+	border-color: rgba(255, 255, 255, 0.18);
+}
+
+</style>
+
+<style>
+/* Tomorrow Theme */
+/* http://jmblog.github.com/color-themes-for-google-code-highlightjs */
+/* Original theme - https://github.com/chriskempson/tomorrow-theme */
+
+/* Tomorrow Comment */
+.hljs-comment,
+.hljs-quote {
+	color: #8e908c;
+}
+
+/* Tomorrow Red */
+.hljs-variable,
+.hljs-template-variable,
+.hljs-tag,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-regexp,
+.hljs-deletion {
+	color: #c82829;
+}
+
+/* Tomorrow Orange */
+.hljs-number,
+.hljs-built_in,
+.hljs-builtin-name,
+.hljs-literal,
+.hljs-type,
+.hljs-params,
+.hljs-meta,
+.hljs-link {
+	color: #f5871f;
+}
+
+/* Tomorrow Yellow */
+.hljs-attribute {
+	color: #eab700;
+}
+
+/* Tomorrow Green */
+.hljs-string,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-addition {
+	color: #718c00;
+}
+
+/* Tomorrow Blue */
+.hljs-title,
+.hljs-section {
+	color: #4271ae;
+}
+
+/* Tomorrow Purple */
+.hljs-keyword,
+.hljs-selector-tag {
+	color: #8959a8;
+}
+
+.hljs {
+	display: block;
+	overflow-x: auto;
+	color: #4d4d4c;
+	padding: 0.5em;
+}
+
+.hljs-emphasis {
+	font-style: italic;
+}
+
+.hljs-strong {
+	font-weight: bold;
+}
+</style>
+
+<style>
+/*
+ * Markdown PDF CSS
+ */
+
+ body {
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif, "Meiryo";
+	padding: 0 12px;
+}
+
+pre {
+	background-color: #f8f8f8;
+	border: 1px solid #cccccc;
+	border-radius: 3px;
+	overflow-x: auto;
+	white-space: pre-wrap;
+	overflow-wrap: break-word;
+}
+
+pre:not(.hljs) {
+	padding: 23px;
+	line-height: 19px;
+}
+
+blockquote {
+	background: rgba(127, 127, 127, 0.1);
+	border-color: rgba(0, 122, 204, 0.5);
+}
+
+.emoji {
+	height: 1.4em;
+}
+
+code {
+	font-size: 14px;
+	line-height: 19px;
+}
+
+/* for inline code */
+:not(pre):not(.hljs) > code {
+	color: #C9AE75; /* Change the old color so it seems less like an error */
+	font-size: inherit;
+}
+
+/* Page Break : use <div class="page"/> or <div class="page"></div> to insert page break
+-------------------------------------------------------- */
+.page {
+	page-break-after: always;
+}
+
+</style>
+
+<script src="https://unpkg.com/mermaid/dist/mermaid.min.js"></script>
+</head>
+<body>
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: document.body.classList.contains('vscode-dark') || document.body.classList.contains('vscode-high-contrast')
+          ? 'dark'
+          : 'default'
+    });
+  </script>
+<p>当日の主な使い方とトラブル対応の要点まとめです（詳細は [<code>MANUAL.md</code>](file:///c:/Vivecoding/4E_OVALANT_matching/MANUAL.md) を参照）。</p>
+<hr>
+<h3 id="1-3つの画面の役割">1. 3つの画面の役割</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align:left">画面</th>
+<th style="text-align:left">URL</th>
+<th style="text-align:left">用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left"><strong>参加者画面</strong></td>
+<td style="text-align:left"><code>/</code></td>
+<td style="text-align:left">来場者がスマホでQRから開き、エントリー・整理券確認を行う</td>
+</tr>
+<tr>
+<td style="text-align:left"><strong>会場モニタ</strong></td>
+<td style="text-align:left"><code>/monitor</code></td>
+<td style="text-align:left">会場の大型画面に全画面表示し、対戦中・呼出中・次々回枠を映す</td>
+</tr>
+<tr>
+<td style="text-align:left"><strong>運営画面</strong></td>
+<td style="text-align:left"><code>/admin</code></td>
+<td style="text-align:left">受付スタッフがPC/iPadで開き、試合進行・スキップ・復帰を操作する</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h3 id="2-運営スタッフの基本操作admin">2. 運営スタッフの基本操作（<code>/admin</code>）</h3>
+<p>上段の「試合スロットカード」にあるボタンを状況に応じて押すだけです。</p>
+<ol>
+<li><strong>参加者が受付に揃ったら</strong>
+<ul>
+<li>「2. 次の試合」の <strong>［案内完了］</strong> を押す → 「1. 現在対戦中」へ移動します。</li>
+</ul>
+</li>
+<li><strong>フィールドの試合が終わったら</strong>
+<ul>
+<li>「1. 現在対戦中」の <strong>［試合終了］</strong> を押す → 枠が空き、後ろの枠が自動で繰り上がります。</li>
+</ul>
+</li>
+</ol>
+<hr>
+<h3 id="3-よくある場面と対応方法">3. よくある場面と対応方法</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align:left">場面</th>
+<th style="text-align:left">スタッフの対応方法</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left"><strong>呼出しても来ない組がいる</strong></td>
+<td style="text-align:left">該当組の <strong>［不在スキップ］</strong> を押す。<br>（残された相方グループは、助っ人補充でそのまま試合するか、待機列の先頭に自動で戻ります）</td>
+</tr>
+<tr>
+<td style="text-align:left"><strong>スキップした組が遅れて来た</strong></td>
+<td style="text-align:left">下段テーブルの <strong>［不在スキップ］タブ</strong> を開き、該当組の <strong>［復帰］</strong> を押す。<br>→ <strong>待機列の先頭（最優先）</strong> に戻り、次の空き枠にすぐ割り当てられます。</td>
+</tr>
+<tr>
+<td style="text-align:left"><strong>スキップされた組が既にスマホで再受付していた</strong></td>
+<td style="text-align:left">［復帰］を押すと「既に整理券 #XXX で受付中」と自動で弾かれます。<br>→ 新しく取った方の整理券番号でそのまま待ってもらいます。</td>
+</tr>
+<tr>
+<td style="text-align:left"><strong>3人 vs 2人など人数が足りない</strong></td>
+<td style="text-align:left">そのまま進行して問題ありません。<br>システムが自動で「運営スタッフ助っ人」枠を表示するので、スタッフが1名入って3vs3にします。</td>
+</tr>
+<tr>
+<td style="text-align:left"><strong>客がブラウザを閉じた</strong></td>
+<td style="text-align:left">もう一度受付QR（<code>/</code>）を開いてもらえば、元の整理券画面が自動復元します。</td>
+</tr>
+<tr>
+<td style="text-align:left"><strong>客のスマホが充電切れ・圏外</strong></td>
+<td style="text-align:left">運営画面のテーブルからチーム名・代表者名で整理券番号を確認し、口頭で呼び出します。</td>
+</tr>
+<tr>
+<td style="text-align:left"><strong>朝の本番開始前・リハ終了後</strong></td>
+<td style="text-align:left">運営画面右上の <strong>［全リセット］</strong> でデータを空にします。終了後は <strong>［CSV出力］</strong> で履歴を保存できます。</td>
+</tr>
+</tbody>
+</table>
+
+</body>
+</html>
