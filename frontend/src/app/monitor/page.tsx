@@ -222,7 +222,7 @@ export default function MonitorPage() {
               </Heading>
               {queueState?.is_local_mode && (
                 <span className="text-xs bg-amber-100 text-amber-900 border border-amber-300 font-bold px-2 py-0.5 rounded-4">
-                  🧪 テスト環境
+                  テスト環境
                 </span>
               )}
             </div>

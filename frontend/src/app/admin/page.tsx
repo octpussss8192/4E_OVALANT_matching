@@ -16,7 +16,7 @@ import {
   ModalDialogActions,
   type StatusBadgeVariant,
 } from '@/design-system';
-import { getQueueStatus, advanceMatch, skipEntry, resetSystem, addSampleGroups } from '@/lib/api';
+import { getQueueStatus, advanceMatch, skipEntry, restoreEntry, resetSystem, addSampleGroups } from '@/lib/api';
 import { subscribeToMatchUpdates } from '@/lib/supabase';
 import type { QueueStatusResponse, Match, EntryGroup } from '@/types';
 
@@ -62,6 +62,10 @@ export default function AdminPage() {
   // 不在スキップ確認モーダル用状態
   const [skipTarget, setSkipTarget] = useState<EntryGroup | null>(null);
   const skipDialogRef = useRef<HTMLDialogElement>(null);
+
+  // 救済（復帰）確認モーダル用状態
+  const [restoreTarget, setRestoreTarget] = useState<EntryGroup | null>(null);
+  const restoreDialogRef = useRef<HTMLDialogElement>(null);
 
   // 全リセット確認モーダル用状態
   const resetDialogRef = useRef<HTMLDialogElement>(null);
@@ -269,6 +273,18 @@ export default function AdminPage() {
     setSkipTarget(null);
   };
 
+  // 復帰確認ダイアログを開く
+  const openRestoreModal = (group: EntryGroup) => {
+    setRestoreTarget(group);
+    restoreDialogRef.current?.showModal();
+  };
+
+  // 復帰確認ダイアログを閉じる
+  const closeRestoreModal = () => {
+    restoreDialogRef.current?.close();
+    setRestoreTarget(null);
+  };
+
   // スキップ実行
   const handleConfirmSkip = async () => {
     if (!skipTarget) return;
@@ -301,6 +317,34 @@ export default function AdminPage() {
         type: 'error',
         title: 'スキップエラー',
         message: err.message || 'スキップに失敗しました',
+      });
+    } finally {
+      actionLoadingRef.current = false;
+      setActionLoading(false);
+      setActionLoadingText(null);
+    }
+  };
+
+  // 復帰実行
+  const handleConfirmRestore = async () => {
+    if (!restoreTarget) return;
+    actionLoadingRef.current = true;
+    setActionLoading(true);
+    setActionLoadingText(`待機列復帰処理中 (#${restoreTarget.entry_number} ${restoreTarget.team_name})...`);
+    try {
+      await restoreEntry(restoreTarget.id);
+      closeRestoreModal();
+      setActionFeedback({
+        type: 'success',
+        title: '待機列に復帰させました',
+        message: `#${restoreTarget.entry_number}「${restoreTarget.team_name}」を待機列の最優先に復帰させました。`,
+      });
+      await fetchStatus(true);
+    } catch (err: any) {
+      setActionFeedback({
+        type: 'error',
+        title: '復帰エラー',
+        message: err.message || '復帰処理に失敗しました',
       });
     } finally {
       actionLoadingRef.current = false;
@@ -534,7 +578,7 @@ export default function AdminPage() {
               </Heading>
               {queueState?.is_local_mode ? (
                 <StatusBadge variant="gray" size="sm" className="bg-amber-100 text-amber-900 border-amber-300 font-bold">
-                  🧪 ローカル検証モード (本番DB保護中)
+                  ローカル検証モード (本番DB保護中)
                 </StatusBadge>
               ) : (
                 <StatusBadge variant={fetchError ? 'error' : 'key'} size="sm">
@@ -768,6 +812,17 @@ export default function AdminPage() {
                                     不在スキップ
                                   </Button>
                                 )}
+                                {group.status === 'skipped' && (
+                                  <Button
+                                    size="xs"
+                                    variant="outline"
+                                    className="text-key-900 border-key-900 hover:bg-key-50"
+                                    onClick={() => openRestoreModal(group)}
+                                    aria-disabled={actionLoading}
+                                  >
+                                    復帰
+                                  </Button>
+                                )}
                               </td>
                             </tr>
                           );
@@ -836,6 +891,53 @@ export default function AdminPage() {
                   </span>
                 ) : (
                   'スキップを実行する'
+                )}
+              </Button>
+            </ModalDialogActions>
+          </ModalDialogContent>
+        </ModalDialog>
+
+        {/* スキップ救済（復帰）確認モーダルダイアログ */}
+        <ModalDialog ref={restoreDialogRef}>
+          <ModalDialogContent className="max-w-md">
+            <ModalDialogHeader>
+              <ModalDialogHeading className="text-lg font-bold text-solid-gray-900">
+                待機列への復帰確認
+              </ModalDialogHeading>
+              <ModalDialogClose onClick={closeRestoreModal} />
+            </ModalDialogHeader>
+            <ModalDialogBody>
+              <div className="space-y-3 text-sm text-solid-gray-800">
+                <p>
+                  不在スキップされた以下のグループを<strong>待機列最優先（先頭）に復帰</strong>させますか？
+                </p>
+                {restoreTarget && (
+                  <div className="p-3 bg-solid-gray-50 border border-solid-gray-300 rounded-8 font-bold text-xs text-solid-gray-900">
+                    #{restoreTarget.entry_number} {restoreTarget.team_name} (代表: {restoreTarget.leader_name} / {restoreTarget.headcount}名)
+                  </div>
+                )}
+                <p className="text-xs text-solid-gray-600 leading-relaxed">
+                  復帰させたグループは待機列の先頭に配置され、次の空き枠または次回枠へ優先的にマッチングされます。
+                </p>
+              </div>
+            </ModalDialogBody>
+            <ModalDialogActions className="flex justify-end gap-2">
+              <Button size="sm" variant="outline" onClick={closeRestoreModal} aria-disabled={actionLoading}>
+                キャンセル
+              </Button>
+              <Button
+                size="sm"
+                variant="solid-fill"
+                className="min-w-32 font-bold"
+                onClick={handleConfirmRestore}
+                aria-disabled={actionLoading}
+              >
+                {actionLoading ? (
+                  <span className="flex items-center justify-center gap-1.5">
+                    <Spinner className="size-3.5" /> 復帰処理中...
+                  </span>
+                ) : (
+                  '待機列に復帰させる'
                 )}
               </Button>
             </ModalDialogActions>

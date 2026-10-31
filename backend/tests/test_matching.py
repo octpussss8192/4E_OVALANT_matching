@@ -630,3 +630,44 @@ def test_skip_2p_in_calling_prevents_broken_1v2_and_rematches():
     assert next_match is not None
     assert next_match["total_players"] == 6
     assert {g["id"] for g in next_match["assigned_groups"]} == {g2_id, g3_id, g4_id}
+
+
+def test_restore_skipped_entry_to_front_of_queue():
+    """不在スキップされたグループをスタッフが救済（復帰）した際、
+    ステータスが復帰し、待機列の最優先として即座に再マッチングされることを検証"""
+    r1 = client.post(
+        "/api/entries",
+        json={"session_id": "s1", "leader_name": "A", "team_name": "組1", "headcount": 3, "preference": "open"},
+    )
+    r2 = client.post(
+        "/api/entries",
+        json={"session_id": "s2", "leader_name": "B", "team_name": "組2", "headcount": 3, "preference": "open"},
+    )
+    g1_id = r1.json()["entry"]["id"]
+    g2_id = r2.json()["entry"]["id"]
+
+    # 1. 組1 を不在スキップ
+    skip_res = client.post(f"/api/admin/entries/{g1_id}/skip", json={"reason": "不在"})
+    assert skip_res.status_code == 200
+
+    st_skipped = client.get(f"/api/entries/{g1_id}").json()
+    assert st_skipped["entry"]["status"] == "skipped"
+
+    # 2. 戻ってきた組1 をスタッフが救済復帰
+    restore_res = client.post(f"/api/admin/entries/{g1_id}/restore")
+    assert restore_res.status_code == 200
+
+    # 3. 組1 が待機列・マッチ枠に復帰していること
+    st_restored = client.get(f"/api/entries/{g1_id}").json()
+    assert st_restored["entry"]["status"] in ("waiting", "called")
+
+    # Next枠に 組1 と 組2 が再度マッチングされていること
+    st_queue = client.get("/api/status").json()
+    assert st_queue["next_match"] is not None
+    group_ids = [g["id"] for g in st_queue["next_match"]["assigned_groups"]]
+    assert g1_id in group_ids
+    assert g2_id in group_ids
+
+    # 4. すでにアクティブなグループに対する二重復帰は400で拒否されること
+    restore_again = client.post(f"/api/admin/entries/{g1_id}/restore")
+    assert restore_again.status_code == 400

@@ -165,6 +165,16 @@ def skip_entry(entry_id: str, req: SkipEntryRequest = SkipEntryRequest()):
     return ActionSuccessResponse(success=True, message="不在グループをスキップし、枠の再編成と繰り上げを行いました")
 
 
+@router.post("/admin/entries/{entry_id}/restore", response_model=ActionSuccessResponse)
+def restore_entry(entry_id: str):
+    """不在スキップされたグループを待機列最優先に救済・復帰"""
+    _ensure_state_loaded(require_fresh=True)
+    success = engine.restore_entry(entry_id)
+    if not success:
+        raise HTTPException(status_code=400, detail="スキップ済みのエントリーのみ復帰できます")
+    return ActionSuccessResponse(success=True, message="不在グループを待機列に復帰し、スロットを再編成しました")
+
+
 @router.post("/admin/reset", response_model=ActionSuccessResponse)
 def reset_system():
     """デバッグ用: 全データのリセット"""

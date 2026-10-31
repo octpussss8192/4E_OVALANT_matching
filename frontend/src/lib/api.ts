@@ -97,6 +97,17 @@ export async function skipEntry(entryId: string, reason: string): Promise<void> 
   }
 }
 
+export async function restoreEntry(entryId: string): Promise<void> {
+  const apiBase = getApiBase();
+  const res = await fetch(`${apiBase}/admin/entries/${entryId}/restore`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({ detail: '復帰に失敗しました' }));
+    throw new Error(errorData.detail || '復帰に失敗しました');
+  }
+}
+
 export async function resetSystem(): Promise<void> {
   const apiBase = getApiBase();
   await fetch(`${apiBase}/admin/reset`, { method: 'POST' });

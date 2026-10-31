@@ -480,6 +480,55 @@ class MatchingEngine:
             self.save_state()
             return True
 
+    def restore_entry(
+        self,
+        entry_id: str,
+        current_time: Optional[datetime] = None,
+    ) -> bool:
+        """不在スキップされたグループを待機キューの最優先（先頭）に救済・復帰させる"""
+        with self._lock:
+            now = ensure_utc(current_time) if current_time else now_utc()
+            target = self._get_entry(entry_id)
+            if not target:
+                return False
+
+            # スキップ状態のものだけが復帰可能（二重復帰や対戦完了・アクティブ枠の誤復帰を防止）
+            if target.status != EntryStatus.SKIPPED:
+                return False
+
+            target.status = EntryStatus.WAITING
+            target.skip_reason = None
+            target.assigned_match_id = None
+            target.updated_at = now
+
+            # 待機列の最優先にするため、現在の全待機グループの中で最古となるよう created_at を設定
+            waiting_entries = [e for e in self.entries if e.status == EntryStatus.WAITING and e.id != target.id]
+            if waiting_entries:
+                earliest_created = min(ensure_utc(e.created_at) for e in waiting_entries)
+                target.created_at = min(ensure_utc(target.created_at), earliest_created - timedelta(seconds=1))
+            else:
+                target.created_at = now - timedelta(seconds=1)
+
+            # SCHEDULED (3. その次の試合) が存在する場合、復帰したグループを公正に即時再編成できるよう
+            # SCHEDULED を一旦解体して待機列と一緒に再編成する
+            for sched_m in self.matches:
+                if sched_m.status == MatchStatus.SCHEDULED:
+                    sched_m.status = MatchStatus.CANCELLED
+                    for sg in sched_m.assigned_groups:
+                        s_ent = self._get_entry(sg.id)
+                        if s_ent and s_ent.status not in (EntryStatus.SKIPPED, EntryStatus.CANCELLED):
+                            s_ent.status = EntryStatus.WAITING
+                            s_ent.assigned_match_id = None
+                            s_ent.updated_at = now
+                        if sg.status not in (EntryStatus.SKIPPED, EntryStatus.CANCELLED):
+                            sg.status = EntryStatus.WAITING
+                            sg.assigned_match_id = None
+                            sg.updated_at = now
+
+            self.recalculate_slots(now)
+            self.save_state()
+            return True
+
     # --------------------------------------------------------------------------
     # 3. 試合進行操作 (Advance)
     # --------------------------------------------------------------------------

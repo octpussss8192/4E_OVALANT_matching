@@ -91,6 +91,21 @@ export default function ParticipantPage() {
   const isSkipped = entryStatus === 'skipped' || entryStatus === 'cancelled';
   useWakeLock(isCalled || isNextNext);
 
+  // 呼出中になった瞬間に短く1回バイブレーション通知
+  const prevIsCalledRef = useRef(false);
+  useEffect(() => {
+    if (isCalled && !prevIsCalledRef.current) {
+      if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+        try {
+          navigator.vibrate([200, 100, 200]);
+        } catch {
+          // ignore
+        }
+      }
+    }
+    prevIsCalledRef.current = isCalled;
+  }, [isCalled]);
+
   // URLパラメータに entry_id を反映（ブラウザ再読み込み・離脱後の復帰を強固にする）
   const updateUrlEntryId = (id: string | null) => {
     if (typeof window === 'undefined') return;
@@ -499,19 +514,19 @@ export default function ParticipantPage() {
                     </StatusBadge>
                   ) : isNextNext ? (
                     <StatusBadge variant="key" size="md">
-                      次々回 試合枠 (まもなく呼出・準備待機)
+                      次々回 試合枠 (まもなく呼出)
                     </StatusBadge>
                   ) : isInMatch ? (
                     <StatusBadge variant="key" size="md">
-                      現在対戦中 (フィールド案内済)
+                      対戦中
                     </StatusBadge>
                   ) : isCompleted ? (
                     <StatusBadge variant="success" size="md">
-                      対戦完了 (ご参加ありがとうございました)
+                      対戦完了
                     </StatusBadge>
                   ) : isSkipped ? (
                     <StatusBadge variant="error" size="md">
-                      不在スキップ (キャンセル済)
+                      不在スキップ
                     </StatusBadge>
                   ) : (
                     <StatusBadge variant="gray" size="md">
@@ -519,6 +534,12 @@ export default function ParticipantPage() {
                     </StatusBadge>
                   )}
                 </div>
+
+                {!isCalled && !isNextNext && !isInMatch && !isCompleted && !isSkipped && (
+                  <p className="mt-3 text-xs text-solid-gray-600">
+                    ※呼出時に不在の場合はスキップされます。お呼び出しまでそのままお待ちください。
+                  </p>
+                )}
 
                 {isCalled && (
                   <div className="mt-5 text-left">
@@ -528,7 +549,7 @@ export default function ParticipantPage() {
                       title="受付呼出中"
                     >
                       <span className="font-bold text-sm">
-                        お待たせしました。受付スタッフへこの画面をお見せください。
+                        画面を受付スタッフにお見せください。呼出時に不在の場合はスキップされます。
                       </span>
                     </NotificationBanner>
                   </div>
@@ -539,10 +560,10 @@ export default function ParticipantPage() {
                     <NotificationBanner
                       bannerStyle="color-chip"
                       type="info2"
-                      title="次々回の試合枠に入りました"
+                      title="まもなく呼出"
                     >
                       <span className="text-sm">
-                        まもなくお呼び出しいたします。受付付近でお待ちください。
+                        次々回の試合枠に入りました。受付付近でお待ちください。
                       </span>
                     </NotificationBanner>
                   </div>
@@ -553,10 +574,10 @@ export default function ParticipantPage() {
                     <NotificationBanner
                       bannerStyle="color-chip"
                       type="info1"
-                      title="現在対戦中"
+                      title="対戦中"
                     >
-                      <span className="font-bold text-sm">
-                        現在フィールドで対戦中の枠です。健闘を祈ります！
+                      <span className="text-sm font-medium">
+                        フィールドへご案内中です。スタッフの指示に従ってご入場ください。
                       </span>
                     </NotificationBanner>
                   </div>
@@ -567,10 +588,10 @@ export default function ParticipantPage() {
                     <NotificationBanner
                       bannerStyle="color-chip"
                       type="success"
-                      title="試合終了"
+                      title="対戦終了"
                     >
                       <span className="text-sm">
-                        この整理券での対戦は終了しました。もう一度遊ぶ場合は下のボタンから新規エントリーしてください。
+                        この整理券での対戦は終了しました。
                       </span>
                     </NotificationBanner>
                     <Button
@@ -579,7 +600,7 @@ export default function ParticipantPage() {
                       className="w-full justify-center font-bold"
                       onClick={() => setShowNewEntryForm(true)}
                     >
-                      + もう一度エントリーする（新規受付）
+                      + 新規エントリーする
                     </Button>
                   </div>
                 )}
@@ -589,10 +610,10 @@ export default function ParticipantPage() {
                     <NotificationBanner
                       bannerStyle="color-chip"
                       type="error"
-                      title="不在のためスキップされました"
+                      title="不在スキップ"
                     >
                       <span className="text-sm">
-                        受付呼出時にご不在だったため、この整理券はスキップされました。再度参加される場合は下のボタンから再エントリーしてください。
+                        呼出時に不在のためスキップされました。遅れて来られた場合は受付スタッフにお声がけください。
                       </span>
                     </NotificationBanner>
                     <Button
@@ -601,7 +622,7 @@ export default function ParticipantPage() {
                       className="w-full justify-center font-bold"
                       onClick={() => setShowNewEntryForm(true)}
                     >
-                      + 再エントリーする（新規受付）
+                      + 新規エントリーする
                     </Button>
                   </div>
                 )}
@@ -649,9 +670,9 @@ export default function ParticipantPage() {
               title="ご案内と注意事項"
             >
               <ul className="list-disc pl-4 space-y-1 text-xs text-solid-gray-700">
-                <li>呼出時に受付におられない場合、不在スキップとなり再エントリーが必要になります。</li>
-                <li>相手チームや味方に欠員が生じた場合は、運営スタッフが助っ人参加して3 vs 3の対戦を維持します。</li>
-                <li>「呼出中」の画面は消灯しないよう画面ロック防止機能が働きます。</li>
+                <li>呼出時に受付におられない場合はスキップされます。遅れて来られた場合は受付スタッフにお声がけください。</li>
+                <li>欠員が生じた場合は、運営スタッフがサポートに入り試合を実施します。</li>
+                <li>呼出画面の表示中は、画面のスリープを自動防止します。</li>
               </ul>
             </NotificationBanner>
 
@@ -670,7 +691,7 @@ export default function ParticipantPage() {
         ) : (
           /* 受付フォーム（未エントリー、または追加エントリー希望時） */
           <div className="space-y-6">
-            {/* ★ すでに発行済みの整理券がある場合の特大復帰カード ★ */}
+            {/* すでに発行済みの整理券がある場合の復帰カード */}
             {(myEntryInfo || myEntriesList.length > 0) && (
               <div className="bg-key-50 border-2 border-key-900 rounded-8 p-4 shadow-sm space-y-3">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
