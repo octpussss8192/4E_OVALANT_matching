@@ -314,8 +314,8 @@ class MatchingEngine:
         with self._lock:
             now = ensure_utc(created_at) if created_at else now_utc()
 
-            # 4名以上は友人が敵味方に分断されるのを防ぐため強制的に Closed
-            actual_preference = PreferenceType.CLOSED if headcount >= 4 else preference
+            # 1〜3名は強制的に Open（合流戦）、4〜6名は強制的に Closed（貸切戦）
+            actual_preference = PreferenceType.CLOSED if headcount >= 4 else PreferenceType.OPEN
 
             entry = EntryGroup(
                 id=str(uuid.uuid4()),

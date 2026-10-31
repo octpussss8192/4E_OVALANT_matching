@@ -74,10 +74,12 @@ export default function ParticipantPage() {
   const [, setDuplicateModalOpen] = useState(false);
   const duplicateDialogRef = useRef<HTMLDialogElement>(null);
 
-  // 4名以上選択時は自動的に Closed に切り替え（味方は身内・敵は他人ルール）
+  // 1〜3名は Open（合流戦）、4〜6名は Closed（貸切戦）に自動切り替え
   useEffect(() => {
     if (headcount >= 4) {
       setPreference('closed');
+    } else {
+      setPreference('open');
     }
   }, [headcount]);
 
@@ -863,15 +865,14 @@ export default function ParticipantPage() {
                     ))}
                   </div>
                   <SupportText className="text-xs text-solid-gray-600 mt-1">
-                    4名以上のグループは友人が敵味方に分断されるのを防ぐため自動的に「貸切・身内戦」となります。
+                    1〜3名は「他グループと合流対戦 (Open)」、4〜6名は「貸切・身内戦 (Closed)」が自動選択されます。
                   </SupportText>
                 </fieldset>
 
-                {/* マッチング希望形式 */}
+                {/* マッチング形式（人数に応じて自動選択） */}
                 <fieldset>
                   <div className="flex items-center gap-2 mb-2">
-                    <legend className="text-sm font-bold text-solid-gray-900">マッチング希望</legend>
-                    <RequirementBadge>必須</RequirementBadge>
+                    <legend className="text-sm font-bold text-solid-gray-900">マッチング形式 (人数により自動決定)</legend>
                   </div>
                   <div className="space-y-3">
                     <div className={`p-3 rounded-8 border border-solid-gray-300 bg-white ${headcount >= 4 ? 'opacity-50' : ''}`}>
@@ -886,25 +887,29 @@ export default function ParticipantPage() {
                         aria-disabled={headcount >= 4}
                         size="md"
                       >
-                        <span className="font-bold text-sm text-solid-gray-900">他グループと合流対戦 (Open)</span>
+                        <span className="font-bold text-sm text-solid-gray-900">他グループと合流対戦 (Open / 1〜3名)</span>
                       </Radio>
                       <p className="text-xs text-solid-gray-600 mt-1 pl-10">
-                        他の来場者と3vs3でマッチング。試合時間 10分。マッチングが早くなる可能性があります。
+                        1〜3名グループ対象。他の来場者と3vs3でマッチングします（試合時間 10分）。
                       </p>
                     </div>
 
-                    <div className="p-3 rounded-8 border border-solid-gray-300 bg-white">
+                    <div className={`p-3 rounded-8 border border-solid-gray-300 bg-white ${headcount <= 3 ? 'opacity-50' : ''}`}>
                       <Radio
                         name="preference"
                         value="closed"
-                        checked={preference === 'closed'}
-                        onChange={() => setPreference('closed')}
+                        checked={preference === 'closed' && headcount >= 4}
+                        onChange={() => {
+                          if (headcount >= 4) setPreference('closed');
+                        }}
+                        disabled={headcount <= 3}
+                        aria-disabled={headcount <= 3}
                         size="md"
                       >
-                        <span className="font-bold text-sm text-solid-gray-900">自分たちだけで貸切・身内戦 (Closed)</span>
+                        <span className="font-bold text-sm text-solid-gray-900">自分たちだけで貸切・身内戦 (Closed / 4〜6名)</span>
                       </Radio>
                       <p className="text-xs text-solid-gray-600 mt-1 pl-10">
-                        他のグループと混ざらず対戦。試合時間 8分（少し短縮枠となります）。
+                        4〜6名グループ対象。他のグループと混ざらず身内のみで対戦します（試合時間 8分）。
                       </p>
                     </div>
                   </div>
