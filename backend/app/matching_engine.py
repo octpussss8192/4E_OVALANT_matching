@@ -938,23 +938,64 @@ class MatchingEngine:
                 elif m.status == MatchStatus.SCHEDULED:
                     slot_name = "next_next"
 
-        ahead_count = 0
+        ahead_groups = []
         if slot_name == "waiting":
-            ahead_count = sum(
-                1 for e in self.entries
+            ahead_groups = [
+                e for e in self.entries
                 if e.status == EntryStatus.WAITING and ensure_utc(e.created_at) < ensure_utc(group.created_at)
-            )
+            ]
+        ahead_count = len(ahead_groups)
 
-        # 予想待ち時間（1サイクル約10〜12分）
-        cycle_minutes = 12
+        # 実際の稼働スロット状況と待機グループの試合枠数に基づく予想待ち時間算出
+        current_match = next((m for m in self.matches if m.status == MatchStatus.IN_PROGRESS), None)
+        next_match = next((m for m in self.matches if m.status == MatchStatus.CALLING), None)
+        next_next_match = next((m for m in self.matches if m.status == MatchStatus.SCHEDULED), None)
+
+        if current_match:
+            if current_match.started_at:
+                elapsed_min = max(0.0, (now_utc() - ensure_utc(current_match.started_at)).total_seconds() / 60.0)
+                current_remaining = max(2, round(current_match.duration_minutes - elapsed_min))
+            else:
+                current_remaining = current_match.duration_minutes
+        else:
+            current_remaining = 0
+
         if slot_name == "current":
             wait_min = 0
         elif slot_name == "next":
-            wait_min = 5
+            # 既に受付呼出中（今すぐ受付へ行く状態）
+            wait_min = 0
         elif slot_name == "next_next":
-            wait_min = 15
+            # 次々回枠: 現在対戦中の試合が終わり、Nextが入場するタイミングで呼出される
+            wait_min = current_remaining if current_match else 5
         else:
-            wait_min = 20 + (ahead_count // 2) * cycle_minutes
+            # 待機列 (waiting):
+            # 1) 現在稼働中のスロットが消化されるまでの時間
+            slot_wait = 0
+            if next_match and next_next_match:
+                slot_wait = (current_remaining if current_match else 3) + (next_match.duration_minutes + 2)
+            elif next_match:
+                slot_wait = current_remaining if current_match else 3
+            else:
+                slot_wait = 0
+
+            # 2) 自分の前に並んでいる待機グループが消費する試合サイクル時間
+            #    - 貸切(CLOSED)は1組=1試合(約10分)
+            #    - 合流(OPEN)は合計6名ごとに1試合(約12分)
+            closed_ahead = sum(1 for e in ahead_groups if e.preference == PreferenceType.CLOSED)
+            open_players_ahead = sum(e.headcount for e in ahead_groups if e.preference == PreferenceType.OPEN)
+            if group.preference == PreferenceType.OPEN:
+                open_matches_ahead = (open_players_ahead + group.headcount - 1) // 6
+            else:
+                open_matches_ahead = (open_players_ahead + 5) // 6
+
+            queue_wait = closed_ahead * 10 + open_matches_ahead * 12
+
+            # 3) スロットが空いているのに waiting にいる場合（Openの人数集まり待ち）は目安約5分
+            if slot_wait == 0 and queue_wait == 0:
+                wait_min = 5
+            else:
+                wait_min = slot_wait + queue_wait
 
         return {
             "entry": group,

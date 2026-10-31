@@ -47,8 +47,8 @@ export default function AdminPage() {
     message: string;
     type: 'info1' | 'success' | 'warning' | 'error';
   } | null>(null);
-  // 表示モード ('active': 進行中のみ, 'history': 完了・スキップ含む全履歴)
-  const [viewMode, setViewMode] = useState<'active' | 'history'>('active');
+  // 表示モード ('active': 進行中のみ, 'skipped': 不在スキップのみ, 'history': 完了・スキップ含む全履歴)
+  const [viewMode, setViewMode] = useState<'active' | 'skipped' | 'history'>('active');
   const [isFetching, setIsFetching] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string>('');
   const [fetchError, setFetchError] = useState(false);
@@ -684,14 +684,28 @@ export default function AdminPage() {
               ? queueState.all_history_entries
               : (queueState?.all_active_entries ?? []);
 
-            const displayGroups = viewMode === 'active' ? activeList : historyList;
+            const skippedList = historyList.filter((g) => g.status === 'skipped');
+
+            const displayGroups =
+              viewMode === 'active'
+                ? activeList
+                : viewMode === 'skipped'
+                ? skippedList
+                : historyList;
+
+            const headingTitle =
+              viewMode === 'active'
+                ? '進行中エントリー'
+                : viewMode === 'skipped'
+                ? '不在スキップ一覧'
+                : '全エントリー履歴';
 
             return (
               <>
                 <div className="flex items-center justify-between border-b border-solid-gray-200 pb-3 mb-4 flex-wrap gap-3">
                   <div className="flex items-center gap-3">
                     <Heading size="20" hasChip={true} className="font-bold text-solid-gray-900">
-                      {viewMode === 'active' ? '進行中エントリー' : '全エントリー履歴'} ({displayGroups.length}組)
+                      {headingTitle} ({displayGroups.length}組)
                     </Heading>
                     <span className="text-xs text-solid-gray-600">
                       (待機中: {queueState?.total_waiting_groups ?? 0}組 / {queueState?.total_waiting_players ?? 0}名)
@@ -707,6 +721,16 @@ export default function AdminPage() {
                         onClick={() => setViewMode('active')}
                       >
                         進行中のみ ({activeList.length})
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant={viewMode === 'skipped' ? 'solid-fill' : 'outline'}
+                        onClick={() => {
+                          setViewMode('skipped');
+                          fetchStatus(true);
+                        }}
+                      >
+                        不在スキップ ({skippedList.length})
                       </Button>
                       <Button
                         size="sm"
@@ -839,6 +863,8 @@ export default function AdminPage() {
                       </div>
                     ) : viewMode === 'active' ? (
                       '現在、進行中・待機中のグループはありません。'
+                    ) : viewMode === 'skipped' ? (
+                      '現在、不在スキップされたグループはありません。'
                     ) : (
                       '過去のエントリー履歴はありません。'
                     )}
