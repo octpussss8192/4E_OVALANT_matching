@@ -216,9 +216,16 @@ export default function MonitorPage() {
       <header className="bg-white border-b border-solid-gray-300 px-6 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div>
-            <Heading size="24" hasChip={true} className="font-bold text-solid-gray-900 leading-tight">
-              OVERTER WATCH2026 3v3 会場進行モニタ
-            </Heading>
+            <div className="flex items-center gap-3">
+              <Heading size="24" hasChip={true} className="font-bold text-solid-gray-900 leading-tight">
+                OVERTER WATCH2026 3v3 会場進行モニタ
+              </Heading>
+              {queueState?.is_local_mode && (
+                <span className="text-xs bg-amber-100 text-amber-900 border border-amber-300 font-bold px-2 py-0.5 rounded-4">
+                  🧪 テスト環境
+                </span>
+              )}
+            </div>
             <p className="text-xs text-solid-gray-600 mt-1 pl-4.5">リアルタイム試合進行・対戦組合せ表示</p>
           </div>
           <div className="flex items-center gap-6">

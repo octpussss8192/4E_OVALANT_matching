@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import Enum
 from typing import Optional
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, computed_field, field_validator
 from .datetime_utils import now_utc, ensure_utc
 
 
@@ -69,6 +69,7 @@ class MatchTeams(BaseModel):
     red: TeamSideAssignment
     blue: TeamSideAssignment
 
+    @computed_field
     @property
     def total_staff(self) -> int:
         return self.red.staff_count + self.blue.staff_count
@@ -95,6 +96,7 @@ class Match(BaseModel):
             return None
         return ensure_utc(v)
 
+    @computed_field
     @property
     def total_staff(self) -> int:
         return self.teams.total_staff if self.teams else 0
@@ -142,6 +144,7 @@ class QueueStatusResponse(BaseModel):
     waiting_groups: list[EntryGroup] = Field(default_factory=list)
     all_active_entries: list[EntryGroup] = Field(default_factory=list)
     all_history_entries: list[EntryGroup] = Field(default_factory=list)
+    is_local_mode: bool = False
 
 
 class SkipEntryRequest(BaseModel):

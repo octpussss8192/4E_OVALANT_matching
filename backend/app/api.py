@@ -91,6 +91,7 @@ def get_queue_status():
         waiting_groups=waiting_groups,
         all_active_entries=all_active_entries,
         all_history_entries=all_history_entries,
+        is_local_mode=not engine._is_supabase_active(),
     )
 
 
@@ -145,7 +146,7 @@ def add_sample_data():
 def advance_match(match_id: str):
     """試合ステータスを1段階進行 (scheduled -> calling -> in_progress -> finished)"""
     _ensure_state_loaded(require_fresh=True)
-    success = engine.advance_match_lifecycle()
+    success = engine.advance_match_lifecycle(match_id=match_id)
     if not success:
         raise HTTPException(status_code=400, detail="進行可能な試合スロットがありません")
     return ActionSuccessResponse(success=True, message="試合スロットを進行し、後続を繰り上げました")

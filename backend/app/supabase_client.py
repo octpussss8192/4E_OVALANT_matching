@@ -24,8 +24,13 @@ DEFAULT_SUPABASE_KEY = "sb_publishable_hz-XugfYZSwLEtXqjsTnAw_zY9xLlD_"
 
 
 def get_supabase_config() -> tuple[str, str]:
-    # pytest実行中またはテストフラグ有効時は、本番DB誤操作を防止するため空値を返す
-    if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("TESTING") == "1":
+    # pytest実行中、テストフラグ、ローカルモード有効時は、本番DB誤操作を防止するため空値を返す
+    if (
+        os.environ.get("PYTEST_CURRENT_TEST")
+        or os.environ.get("TESTING") == "1"
+        or os.environ.get("DISABLE_SUPABASE") == "1"
+        or os.environ.get("LOCAL_MODE") == "1"
+    ):
         return "", ""
 
     url = (

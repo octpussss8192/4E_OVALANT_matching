@@ -364,3 +364,269 @@ def test_reconcile_state_heals_ghost_matches_and_orphaned_entries(tmp_path):
     assert len(active_calling) == 1
     assert active_calling[0].id != "ghost-match-1"
     assert len(active_calling[0].assigned_groups) == 2
+
+
+def test_cannot_skip_entry_in_current_in_progress_match():
+    """現在対戦中 (IN_PROGRESS) のグループに対する不在スキップは拒否され、対戦中の試合が壊れないことを検証"""
+    r1 = client.post(
+        "/api/entries",
+        json={"session_id": "s1", "leader_name": "A", "team_name": "赤3名", "headcount": 3, "preference": "open"},
+    )
+    r2 = client.post(
+        "/api/entries",
+        json={"session_id": "s2", "leader_name": "B", "team_name": "青3名", "headcount": 3, "preference": "open"},
+    )
+    g1_id = r1.json()["entry"]["id"]
+
+    status_before = client.get("/api/status").json()
+    next_match_id = status_before["next_match"]["id"]
+
+    # 案内完了 (Next -> Current: IN_PROGRESS)
+    adv_res = client.post(f"/api/admin/matches/{next_match_id}/advance")
+    assert adv_res.status_code == 200
+
+    status_in_progress = client.get("/api/status").json()
+    assert status_in_progress["current_match"] is not None
+    assert status_in_progress["current_match"]["id"] == next_match_id
+
+    # 現在対戦中のグループに対するスキップは拒否されること (400 または 404)
+    skip_res = client.post(f"/api/admin/entries/{g1_id}/skip", json={"reason": "誤操作スキップ"})
+    assert skip_res.status_code in (400, 404)
+
+    # 対戦中の試合とグループがそのまま維持されていること
+    status_after = client.get("/api/status").json()
+    assert status_after["current_match"] is not None
+    assert status_after["current_match"]["id"] == next_match_id
+    assert len(status_after["current_match"]["assigned_groups"]) == 2
+
+
+def test_skip_in_calling_dissolves_scheduled_to_preserve_fifo_priority():
+    """3名組が4組 (#101, #102, #103, #104) エントリーし、
+    Next (#101 vs #102) と Next Next (#103 vs #104) が組まれている状態で、
+    Next の #101 を不在スキップした際、受付前で待っている相方 #102 が追い越されず、
+    即座に #102 vs #103 で Next 枠が再編成されることを検証"""
+    ids = []
+    for i in range(1, 5):
+        r = client.post(
+            "/api/entries",
+            json={
+                "session_id": f"s{i}",
+                "leader_name": f"リーダー{i}",
+                "team_name": f"組{i}",
+                "headcount": 3,
+                "preference": "open",
+            },
+        )
+        ids.append(r.json()["entry"]["id"])
+
+    g1_id, g2_id, g3_id, g4_id = ids
+
+    # スキップ前: Next は g1+g2, Next Next は g3+g4
+    st1 = client.get("/api/status").json()
+    assert {g["id"] for g in st1["next_match"]["assigned_groups"]} == {g1_id, g2_id}
+    assert {g["id"] for g in st1["next_next_match"]["assigned_groups"]} == {g3_id, g4_id}
+
+    # Next の g1 を不在スキップ
+    skip_res = client.post(f"/api/admin/entries/{g1_id}/skip", json={"reason": "不在"})
+    assert skip_res.status_code == 200
+
+    # スキップ後: 受付前にいた g2 が最優先で g3 と組まれ Next 枠に入り、g4 が待機列に戻ること！
+    st2 = client.get("/api/status").json()
+    assert st2["next_match"] is not None
+    assert {g["id"] for g in st2["next_match"]["assigned_groups"]} == {g2_id, g3_id}
+    assert st2["next_next_match"] is None
+    assert [g["id"] for g in st2["waiting_groups"]] == [g4_id]
+
+
+def test_skip_in_calling_with_staff_support_serializes_total_staff_in_api():
+    """Next (CALLING) 枠で [Red: 3名組, Blue: 2名組 + 1名組] のうち Blue 1名組が不在スキップされた際、
+    試合枠は維持されてスタッフ1名が補充され、かつ API の JSON に total_staff=1 が含まれることを検証"""
+    client.post(
+        "/api/entries",
+        json={"session_id": "s1", "leader_name": "A", "team_name": "赤3名", "headcount": 3, "preference": "open"},
+    )
+    client.post(
+        "/api/entries",
+        json={"session_id": "s2", "leader_name": "B", "team_name": "青2名", "headcount": 2, "preference": "open"},
+    )
+    r3 = client.post(
+        "/api/entries",
+        json={"session_id": "s3", "leader_name": "C", "team_name": "青1名", "headcount": 1, "preference": "open"},
+    )
+    g3_id = r3.json()["entry"]["id"]
+
+    # 青1名組を不在スキップ -> 残り Red 3名 vs Blue 2名 なのでスタッフ1名補充で試合維持
+    skip_res = client.post(f"/api/admin/entries/{g3_id}/skip", json={"reason": "不在"})
+    assert skip_res.status_code == 200
+
+    st = client.get("/api/status").json()
+    next_match = st["next_match"]
+    assert next_match is not None
+    assert next_match["total_players"] == 5
+    assert next_match["total_staff"] == 1
+    assert next_match["teams"]["blue"]["staff_count"] == 1
+
+
+def test_advance_specific_match_slot_independently():
+    """『試合終了 (Current)』と『案内完了 (Next)』がそれぞれのスロットを正確に進行させることを検証:
+    1. Next の『案内完了』を押すと Next -> Current に昇格し、Next Next -> Next に繰り上がる。
+    2. Current の『試合終了』を押すと Current のみが FINISHED になって枠が空き、
+       点呼中の Next が勝手に Current に吸い込まれないこと。"""
+    # サンプルデータ4組投入 (Next: 第1試合 Open 6名, Next Next: 第2試合 Closed 4名)
+    st0 = client.post("/api/admin/sample-data").json()
+    m1_id = st0["next_match"]["id"]
+    m2_id = st0["next_next_match"]["id"]
+    assert st0["current_match"] is None
+
+    # 1. 第1試合 (Next) の『案内完了』を押す -> 第1試合が Current、第2試合が Next になる
+    res1 = client.post(f"/api/admin/matches/{m1_id}/advance")
+    assert res1.status_code == 200
+    st1 = client.get("/api/status").json()
+    assert st1["current_match"]["id"] == m1_id
+    assert st1["next_match"]["id"] == m2_id
+    assert st1["next_next_match"] is None
+
+    # 2. 第1試合 (Current) の『試合終了』を押す -> 第1試合が終了して Current が空になり、
+    # 第2試合はまだ受付点呼完了前なので Next に留まること！
+    res2 = client.post(f"/api/admin/matches/{m1_id}/advance")
+    assert res2.status_code == 200
+    st2 = client.get("/api/status").json()
+    assert st2["current_match"] is None
+    assert st2["next_match"]["id"] == m2_id
+
+    # 3. 第2試合 (Next) の点呼が終わって『案内完了』を押す -> 第2試合が Current に昇格する
+    res3 = client.post(f"/api/admin/matches/{m2_id}/advance")
+    assert res3.status_code == 200
+    st3 = client.get("/api/status").json()
+    assert st3["current_match"]["id"] == m2_id
+    assert st3["next_match"] is None
+
+
+def test_full_event_day_simulation(tmp_path):
+    """イベント1日を通した総合シミュレーション:
+    - Open(1〜3名) と Closed(4〜6名、および2〜3名任意貸切) の混在エントリー
+    - 2. 次の試合(CALLING)での不在スキップ（スタッフ補充維持パターン & 解体・優先再編成パターン）
+    - 1. 現在対戦中(IN_PROGRESS)での不在スキップ拒否ガード
+    - 10分経過後の5名・4名柔軟マッチング発動
+    - 全試合終了後のデータ整合性（幽霊マッチ0件・孤立エントリー0件）"""
+    eng = MatchingEngine(
+        flexible_wait_seconds=600,
+        storage_path=tmp_path / "sim_state.json",
+        disable_supabase=True,
+    )
+    t = datetime(2026, 10, 31, 10, 0, 0)
+
+    # Wave 1: 6組エントリー
+    g1 = eng.register_entry("s1", "L1", "Alpha(3)", 3, PreferenceType.OPEN, created_at=t)
+    t += timedelta(seconds=10)
+    g2 = eng.register_entry("s2", "L2", "Bravo(2)", 2, PreferenceType.OPEN, created_at=t)
+    t += timedelta(seconds=10)
+    g3 = eng.register_entry("s3", "L3", "Charlie(1)", 1, PreferenceType.OPEN, created_at=t)
+    t += timedelta(seconds=10)
+    g4 = eng.register_entry("s4", "L4", "Delta貸切(5)", 5, PreferenceType.OPEN, created_at=t)  # 自動Closed
+    t += timedelta(seconds=10)
+    g5 = eng.register_entry("s5", "L5", "Echo(3)", 3, PreferenceType.OPEN, created_at=t)
+    t += timedelta(seconds=10)
+    g6 = eng.register_entry("s6", "L6", "Foxtrot(3)", 3, PreferenceType.OPEN, created_at=t)
+
+    assert g4.preference == PreferenceType.CLOSED
+
+    # 初期スロット確認: Next = g1+g2+g3 (Open 6名), Next Next = g4 (Closed 5名), Waiting = g5, g6
+    calling = next(m for m in eng.matches if m.status == MatchStatus.CALLING)
+    scheduled = next(m for m in eng.matches if m.status == MatchStatus.SCHEDULED)
+    assert {g.id for g in calling.assigned_groups} == {g1.id, g2.id, g3.id}
+    assert {g.id for g in scheduled.assigned_groups} == {g4.id}
+
+    # Next の Charlie(1名) が不在スキップ -> スタッフ1名補充で Next 枠維持
+    t += timedelta(seconds=30)
+    assert eng.skip_entry(g3.id, current_time=t) is True
+    assert calling.status == MatchStatus.CALLING
+    assert calling.total_players == 5
+    assert calling.total_staff == 1
+
+    # Next(calling) を案内完了 -> Current(IN_PROGRESS) へ昇格、g4 が Next へ、g5+g6 が Next Next へ
+    t += timedelta(seconds=30)
+    assert eng.advance_match_lifecycle(match_id=calling.id, current_time=t) is True
+    assert calling.status == MatchStatus.IN_PROGRESS
+
+    # 現在対戦中(IN_PROGRESS)の g1 を誤ってスキップしようとしても拒否されること
+    assert eng.skip_entry(g1.id, current_time=t) is False
+    assert calling.status == MatchStatus.IN_PROGRESS
+    assert g1.status == EntryStatus.IN_MATCH
+
+    # Current(calling) の試合終了 -> Current のみが FINISHED になり、Next(g4) はまだ CALLING に留まる
+    t += timedelta(minutes=10)
+    assert eng.advance_match_lifecycle(match_id=calling.id, current_time=t) is True
+    assert calling.status == MatchStatus.FINISHED
+    assert g1.status == EntryStatus.COMPLETED
+    assert g2.status == EntryStatus.COMPLETED
+    assert scheduled.status == MatchStatus.CALLING  # g4 はまだ受付点呼中
+
+    # g4(Closed) が受付に来ず不在スキップ -> g4 のマッチが CANCELLED になり、Next Next の g5+g6 が Next(CALLING) に昇格
+    t += timedelta(seconds=20)
+    assert eng.skip_entry(g4.id, current_time=t) is True
+    assert g4.status == EntryStatus.SKIPPED
+    m_56 = next(m for m in eng.matches if m.status == MatchStatus.CALLING)
+    assert {g.id for g in m_56.assigned_groups} == {g5.id, g6.id}
+
+    # Wave 2: 端数の 2名組(g7) と 2名組(g8) がエントリー -> 10分未満は待機、10分経過で 2v2(+スタッフ各1名) 成立
+    t += timedelta(seconds=10)
+    g7 = eng.register_entry("s7", "L7", "Golf(2)", 2, PreferenceType.OPEN, created_at=t)
+    g8 = eng.register_entry("s8", "L8", "Hotel(2)", 2, PreferenceType.OPEN, created_at=t + timedelta(seconds=5))
+    assert g7.status == EntryStatus.WAITING
+    assert g8.status == EntryStatus.WAITING
+
+    # 10分経過後に再計算 -> Next Next(SCHEDULED) に 4名マッチ(スタッフ2名補充) として成立
+    t_flex = t + timedelta(seconds=605)
+    eng.recalculate_slots(current_time=t_flex)
+    m_78 = next(m for m in eng.matches if m.status == MatchStatus.SCHEDULED)
+    assert m_78.total_players == 4
+    assert m_78.total_staff == 2
+
+    # 残りの試合を順次案内完了・試合終了まで進める
+    assert eng.advance_match_lifecycle(match_id=m_56.id, current_time=t_flex) is True  # m_56 -> IN_PROGRESS, m_78 -> CALLING
+    assert eng.advance_match_lifecycle(match_id=m_56.id, current_time=t_flex + timedelta(minutes=10)) is True  # m_56 -> FINISHED
+    assert eng.advance_match_lifecycle(match_id=m_78.id, current_time=t_flex + timedelta(minutes=11)) is True  # m_78 -> IN_PROGRESS
+    assert eng.advance_match_lifecycle(match_id=m_78.id, current_time=t_flex + timedelta(minutes=21)) is True  # m_78 -> FINISHED
+
+    # 全試合完了後の整合性検証: アクティブな試合0件、待機中エントリー0件、不整合修復不要(healed == False)
+    assert [m for m in eng.matches if m.status in (MatchStatus.SCHEDULED, MatchStatus.CALLING, MatchStatus.IN_PROGRESS)] == []
+    assert [e for e in eng.entries if e.status not in (EntryStatus.COMPLETED, EntryStatus.SKIPPED)] == []
+    assert eng._reconcile_state() is False
+
+
+def test_skip_2p_in_calling_prevents_broken_1v2_and_rematches():
+    """Next (CALLING) 枠で [Red: 2名組 + 1名組, Blue: 3名組] のうち Red 2名組が不在スキップされた際、
+    不成立な 1名 vs 3名 (助っ人2名) のまま固定されず、一旦解体されて待機列の後続2名組と再編成されることを検証"""
+    r1 = client.post(
+        "/api/entries",
+        json={"session_id": "s1", "leader_name": "A", "team_name": "赤2名", "headcount": 2, "preference": "open"},
+    )
+    r2 = client.post(
+        "/api/entries",
+        json={"session_id": "s2", "leader_name": "B", "team_name": "赤1名", "headcount": 1, "preference": "open"},
+    )
+    r3 = client.post(
+        "/api/entries",
+        json={"session_id": "s3", "leader_name": "C", "team_name": "青3名", "headcount": 3, "preference": "open"},
+    )
+    r4 = client.post(
+        "/api/entries",
+        json={"session_id": "s4", "leader_name": "D", "team_name": "待機2名", "headcount": 2, "preference": "open"},
+    )
+
+    g1_id = r1.json()["entry"]["id"]
+    g2_id = r2.json()["entry"]["id"]
+    g3_id = r3.json()["entry"]["id"]
+    g4_id = r4.json()["entry"]["id"]
+
+    # 赤2名組 (g1) を不在スキップ
+    skip_res = client.post(f"/api/admin/entries/{g1_id}/skip", json={"reason": "不在"})
+    assert skip_res.status_code == 200
+
+    # 1v3 のまま残らず、g2(1名) + g3(3名) + g4(2名) で 3v3 フルマッチが再編成されること！
+    st = client.get("/api/status").json()
+    next_match = st["next_match"]
+    assert next_match is not None
+    assert next_match["total_players"] == 6
+    assert {g["id"] for g in next_match["assigned_groups"]} == {g2_id, g3_id, g4_id}

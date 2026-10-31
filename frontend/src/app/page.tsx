@@ -27,7 +27,7 @@ import {
   ModalDialogClose,
   ModalDialogBody,
 } from '@/design-system';
-import { useSessionId } from '@/hooks/useSessionId';
+import { useSessionId, getOrCreateSessionId } from '@/hooks/useSessionId';
 import { useWakeLock } from '@/hooks/useWakeLock';
 import {
   createEntry,
@@ -39,6 +39,7 @@ import { subscribeToMatchUpdates } from '@/lib/supabase';
 import {
   getMyEntries,
   saveMyEntry,
+  removeMyEntry,
   getActiveEntryId,
   setActiveEntryId,
   syncEntriesFromRemote,
@@ -80,9 +81,15 @@ export default function ParticipantPage() {
     }
   }, [headcount]);
 
-  // 呼出中なら画面スリープを防止
-  const isCalled = myEntryInfo?.entry.status === 'called';
-  useWakeLock(isCalled);
+  // 呼出中（2. 次の試合 = slot_name === 'next'）なら画面スリープを防止
+  const entryStatus = myEntryInfo?.entry.status;
+  const slotName = myEntryInfo?.slot_name;
+  const isCalled = entryStatus === 'called' && slotName === 'next';
+  const isNextNext = entryStatus === 'called' && slotName === 'next_next';
+  const isInMatch = entryStatus === 'in_match' || slotName === 'current';
+  const isCompleted = entryStatus === 'completed';
+  const isSkipped = entryStatus === 'skipped' || entryStatus === 'cancelled';
+  useWakeLock(isCalled || isNextNext);
 
   // URLパラメータに entry_id を反映（ブラウザ再読み込み・離脱後の復帰を強固にする）
   const updateUrlEntryId = (id: string | null) => {
@@ -112,21 +119,27 @@ export default function ParticipantPage() {
     return list;
   };
 
-  // 自エントリー情報の復元・最新化処理（Cookie + URL + SessionId 3段フォールバック）
+  // 自エントリー情報の復元・最新化処理（Cookie + URL + SessionId 3段フォールバック & 無効ID自動クリーンアップ）
   const fetchMyEntryData = useCallback(async (targetSessionId?: string) => {
-    const sid = targetSessionId || sessionId;
+    const sid = targetSessionId || sessionId || getOrCreateSessionId();
     const activeId = getActiveEntryId();
 
     // 1. 指定 ID の取得試行
+    let loadedFromActiveId: EntryResponse | null = null;
     if (activeId) {
       try {
-        const entryData = await getEntryStatus(activeId);
-        setMyEntryInfo(entryData);
-        updateUrlEntryId(entryData.entry.id);
-        refreshCookieEntries();
-        return entryData;
+        loadedFromActiveId = await getEntryStatus(activeId);
+        // アクティブ中（waiting/called/in_match）であればそのまま確定
+        if (['waiting', 'called', 'in_match'].includes(loadedFromActiveId.entry.status)) {
+          setMyEntryInfo(loadedFromActiveId);
+          updateUrlEntryId(loadedFromActiveId.entry.id);
+          refreshCookieEntries();
+          return loadedFromActiveId;
+        }
       } catch {
-        // 指定IDで見つからない場合はフォールバック
+        // 全リセット等でサーバー側に存在しないIDはローカルから除去
+        updateUrlEntryId(null);
+        removeMyEntry(activeId);
       }
     }
 
@@ -144,11 +157,13 @@ export default function ParticipantPage() {
           );
           refreshCookieEntries();
 
-          // アクティブ（waiting/called/in_match）なエントリーを最優先
+          // アクティブ（waiting/called/in_match）なエントリーを最優先し、なければ指定IDまたは最新履歴を表示
           const activeEntry =
             sessionEntries.find((e) =>
               ['waiting', 'called', 'in_match'].includes(e.entry.status)
-            ) || sessionEntries[0];
+            ) ||
+            loadedFromActiveId ||
+            sessionEntries[0];
 
           setMyEntryInfo(activeEntry);
           setActiveEntryId(activeEntry.entry.id);
@@ -160,7 +175,14 @@ export default function ParticipantPage() {
       }
     }
 
-    // 3. ローカルリストの別エントリーを試行
+    if (loadedFromActiveId) {
+      setMyEntryInfo(loadedFromActiveId);
+      updateUrlEntryId(loadedFromActiveId.entry.id);
+      refreshCookieEntries();
+      return loadedFromActiveId;
+    }
+
+    // 3. ローカルリストの別エントリーを試行（存在しないIDは掃除）
     const currentList = refreshCookieEntries();
     if (currentList.length > 0) {
       for (const item of currentList) {
@@ -170,14 +192,19 @@ export default function ParticipantPage() {
             setMyEntryInfo(entryData);
             setActiveEntryId(item.id);
             updateUrlEntryId(item.id);
+            refreshCookieEntries();
             return entryData;
           } catch {
-            // try next
+            removeMyEntry(item.id);
           }
         }
       }
     }
 
+    // 有効なエントリーが1件も存在しない場合はクリア
+    setMyEntryInfo(null);
+    updateUrlEntryId(null);
+    refreshCookieEntries();
     return null;
   }, [sessionId]);
 
@@ -219,19 +246,22 @@ export default function ParticipantPage() {
     setActiveEntryId(id);
     updateUrlEntryId(id);
     setShowNewEntryForm(false);
+    setErrorMessage(null);
     try {
       const entryData = await getEntryStatus(id);
       setMyEntryInfo(entryData);
       refreshCookieEntries();
-    } catch (err: any) {
-      setErrorMessage(err.message || 'エントリー情報の取得に失敗しました');
+    } catch {
+      removeMyEntry(id);
+      updateUrlEntryId(null);
+      refreshCookieEntries();
+      setMyEntryInfo(null);
     }
   };
 
   // エントリー送信前チェック（既に待機中エントリーがあれば警告モーダルを提示）
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!sessionId) return;
     if (!leaderName.trim() || !teamName.trim()) {
       setErrorMessage('代表者氏名とチーム名を入力してください。');
       return;
@@ -260,11 +290,13 @@ export default function ParticipantPage() {
     duplicateDialogRef.current?.close();
     setDuplicateModalOpen(false);
 
+    const activeSessionId = sessionId || getOrCreateSessionId();
+
     try {
       const res = await createEntry({
-        session_id: sessionId,
-        leader_name: leaderName,
-        team_name: teamName,
+        session_id: activeSessionId,
+        leader_name: leaderName.trim(),
+        team_name: teamName.trim(),
         headcount,
         preference: headcount >= 4 ? 'closed' : preference,
       });
@@ -307,9 +339,16 @@ export default function ParticipantPage() {
           <div className="flex items-center gap-3">
             <span className="w-1.5 h-6 bg-key-900 rounded-full inline-block shrink-0" aria-hidden="true" />
             <div>
-              <Heading size="20" className="font-bold text-solid-gray-900 leading-tight">
-                OVERTER WATCH2026
-              </Heading>
+              <div className="flex items-center gap-2">
+                <Heading size="20" className="font-bold text-solid-gray-900 leading-tight">
+                  OVERTER WATCH2026
+                </Heading>
+                {queueState?.is_local_mode && (
+                  <span className="text-[10px] bg-amber-100 text-amber-900 border border-amber-300 font-bold px-1.5 py-0.5 rounded-4">
+                    テスト環境
+                  </span>
+                )}
+              </div>
               <p className="text-xs text-solid-gray-600">3v3 赤外線シューティング マッチング</p>
             </div>
           </div>
@@ -390,8 +429,14 @@ export default function ParticipantPage() {
                     </StepNavigationStepHeader>
                   </StepNavigationStep>
                   <StepNavigationStep
-                    state={isCalled ? 'completed' : 'reached'}
-                    aria-current={!isCalled ? 'step' : undefined}
+                    state={
+                      isCalled || isInMatch || isCompleted
+                        ? 'completed'
+                        : 'reached'
+                    }
+                    aria-current={
+                      !isCalled && !isInMatch && !isCompleted ? 'step' : undefined
+                    }
                   >
                     <StepNavigationStepHeader>
                       <StepNavigationNumber>2</StepNavigationNumber>
@@ -399,7 +444,13 @@ export default function ParticipantPage() {
                     </StepNavigationStepHeader>
                   </StepNavigationStep>
                   <StepNavigationStep
-                    state={isCalled ? 'reached' : undefined}
+                    state={
+                      isInMatch || isCompleted
+                        ? 'completed'
+                        : isCalled
+                        ? 'reached'
+                        : undefined
+                    }
                     aria-current={isCalled ? 'step' : undefined}
                   >
                     <StepNavigationStepHeader>
@@ -407,7 +458,17 @@ export default function ParticipantPage() {
                       <StepNavigationTitle>受付呼出</StepNavigationTitle>
                     </StepNavigationStepHeader>
                   </StepNavigationStep>
-                  <StepNavigationStep last>
+                  <StepNavigationStep
+                    state={
+                      isCompleted
+                        ? 'completed'
+                        : isInMatch
+                        ? 'reached'
+                        : undefined
+                    }
+                    aria-current={isInMatch ? 'step' : undefined}
+                    last
+                  >
                     <StepNavigationStepHeader>
                       <StepNavigationNumber>4</StepNavigationNumber>
                       <StepNavigationTitle>対戦</StepNavigationTitle>
@@ -418,8 +479,8 @@ export default function ParticipantPage() {
             </div>
 
             <Card
-              variant={isCalled ? 'key' : 'default'}
-              className={isCalled ? 'border-2 border-key-900' : ''}
+              variant={isCalled || isInMatch ? 'key' : 'default'}
+              className={isCalled || isInMatch ? 'border-2 border-key-900' : ''}
             >
               <div className="text-center py-4">
                 <div className="mb-2">
@@ -436,13 +497,25 @@ export default function ParticipantPage() {
                     <StatusBadge variant="key" size="md">
                       呼出中 (受付へお越しください)
                     </StatusBadge>
+                  ) : isNextNext ? (
+                    <StatusBadge variant="key" size="md">
+                      次々回 試合枠 (まもなく呼出・準備待機)
+                    </StatusBadge>
+                  ) : isInMatch ? (
+                    <StatusBadge variant="key" size="md">
+                      現在対戦中 (フィールド案内済)
+                    </StatusBadge>
+                  ) : isCompleted ? (
+                    <StatusBadge variant="success" size="md">
+                      対戦完了 (ご参加ありがとうございました)
+                    </StatusBadge>
+                  ) : isSkipped ? (
+                    <StatusBadge variant="error" size="md">
+                      不在スキップ (キャンセル済)
+                    </StatusBadge>
                   ) : (
                     <StatusBadge variant="gray" size="md">
-                      {myEntryInfo.slot_name === 'next_next'
-                        ? '次々回 試合枠 (準備待機)'
-                        : myEntryInfo.slot_name === 'next'
-                        ? '次回 試合枠 (まもなく呼出)'
-                        : '待機中 (マッチング待ち)'}
+                      待機中 (マッチング待ち)
                     </StatusBadge>
                   )}
                 </div>
@@ -458,6 +531,78 @@ export default function ParticipantPage() {
                         お待たせしました。受付スタッフへこの画面をお見せください。
                       </span>
                     </NotificationBanner>
+                  </div>
+                )}
+
+                {isNextNext && (
+                  <div className="mt-5 text-left">
+                    <NotificationBanner
+                      bannerStyle="color-chip"
+                      type="info2"
+                      title="次々回の試合枠に入りました"
+                    >
+                      <span className="text-sm">
+                        まもなくお呼び出しいたします。受付付近でお待ちください。
+                      </span>
+                    </NotificationBanner>
+                  </div>
+                )}
+
+                {isInMatch && (
+                  <div className="mt-5 text-left">
+                    <NotificationBanner
+                      bannerStyle="color-chip"
+                      type="info1"
+                      title="現在対戦中"
+                    >
+                      <span className="font-bold text-sm">
+                        現在フィールドで対戦中の枠です。健闘を祈ります！
+                      </span>
+                    </NotificationBanner>
+                  </div>
+                )}
+
+                {isCompleted && (
+                  <div className="mt-5 text-left space-y-3">
+                    <NotificationBanner
+                      bannerStyle="color-chip"
+                      type="success"
+                      title="試合終了"
+                    >
+                      <span className="text-sm">
+                        この整理券での対戦は終了しました。もう一度遊ぶ場合は下のボタンから新規エントリーしてください。
+                      </span>
+                    </NotificationBanner>
+                    <Button
+                      variant="solid-fill"
+                      size="md"
+                      className="w-full justify-center font-bold"
+                      onClick={() => setShowNewEntryForm(true)}
+                    >
+                      + もう一度エントリーする（新規受付）
+                    </Button>
+                  </div>
+                )}
+
+                {isSkipped && (
+                  <div className="mt-5 text-left space-y-3">
+                    <NotificationBanner
+                      bannerStyle="color-chip"
+                      type="error"
+                      title="不在のためスキップされました"
+                    >
+                      <span className="text-sm">
+                        受付呼出時にご不在だったため、この整理券はスキップされました。再度参加される場合は下のボタンから再エントリーしてください。
+                      </span>
+                    </NotificationBanner>
+                    <Button
+                      variant="solid-fill"
+                      size="md"
+                      className="w-full justify-center font-bold"
+                      onClick={() => setShowNewEntryForm(true)}
+                    >
+                      + 再エントリーする（新規受付）
+                    </Button>
                   </div>
                 )}
               </div>
@@ -540,7 +685,17 @@ export default function ParticipantPage() {
                           <>
                             整理券 #{myEntryInfo.entry.entry_number} : {myEntryInfo.entry.team_name} (
                             <span className="font-bold text-key-900">
-                              {myEntryInfo.entry.status === 'called' ? '呼出中！受付へ' : '待機中'}
+                              {isCalled
+                                ? '呼出中！受付へ'
+                                : isNextNext
+                                ? '次々回枠（まもなく呼出）'
+                                : isInMatch
+                                ? '現在対戦中'
+                                : isCompleted
+                                ? '対戦完了'
+                                : isSkipped
+                                ? '不在スキップ'
+                                : '待機中'}
                             </span>
                             )
                           </>
@@ -703,7 +858,10 @@ export default function ParticipantPage() {
                         name="preference"
                         value="open"
                         checked={preference === 'open' && headcount <= 3}
-                        onChange={() => setPreference('open')}
+                        onChange={() => {
+                          if (headcount <= 3) setPreference('open');
+                        }}
+                        disabled={headcount >= 4}
                         aria-disabled={headcount >= 4}
                         size="md"
                       >

@@ -35,12 +35,18 @@ def _get_storage_path() -> Path:
     if env_path:
         return Path(env_path)
     base_dir = Path(__file__).resolve().parent.parent / "data"
+    is_local = (
+        os.environ.get("LOCAL_MODE") == "1"
+        or os.environ.get("DISABLE_SUPABASE") == "1"
+        or os.environ.get("TESTING") == "1"
+    )
+    filename = "matching_state_test.json" if is_local else "matching_state.json"
     try:
         base_dir.mkdir(parents=True, exist_ok=True)
-        return base_dir / "matching_state.json"
+        return base_dir / filename
     except Exception:
         fallback_dir = Path(tempfile.gettempdir())
-        return fallback_dir / "overter_watch_matching_state.json"
+        return fallback_dir / f"overter_watch_{filename}"
 
 
 class MatchingEngine:
@@ -48,11 +54,18 @@ class MatchingEngine:
         self,
         flexible_wait_seconds: int = 600,
         storage_path: Optional[Path] = None,
-        disable_supabase: bool = False,
+        disable_supabase: Optional[bool] = None,
     ):
         self.flexible_wait_seconds = flexible_wait_seconds
         self.storage_path = storage_path or _get_storage_path()
-        self.disable_supabase = disable_supabase
+        if disable_supabase is not None:
+            self.disable_supabase = disable_supabase
+        else:
+            self.disable_supabase = bool(
+                os.environ.get("DISABLE_SUPABASE") == "1"
+                or os.environ.get("LOCAL_MODE") == "1"
+                or os.environ.get("TESTING") == "1"
+            )
         self._lock = threading.RLock()
 
         self.entries: list[EntryGroup] = []
@@ -365,8 +378,19 @@ class MatchingEngine:
             if not target:
                 return False
 
-            if target.status in (EntryStatus.COMPLETED, EntryStatus.SKIPPED, EntryStatus.CANCELLED):
+            if target.status in (
+                EntryStatus.IN_MATCH,
+                EntryStatus.COMPLETED,
+                EntryStatus.SKIPPED,
+                EntryStatus.CANCELLED,
+            ):
                 return False
+
+            # 現在対戦中 (IN_PROGRESS) の試合に属している場合はスキップ不可ガード
+            if target.assigned_match_id:
+                assigned_m = next((m for m in self.matches if m.id == target.assigned_match_id), None)
+                if assigned_m and assigned_m.status == MatchStatus.IN_PROGRESS:
+                    return False
 
             target.status = EntryStatus.SKIPPED
             target.skip_reason = reason
@@ -376,6 +400,7 @@ class MatchingEngine:
             if target.assigned_match_id:
                 match = next((m for m in self.matches if m.id == target.assigned_match_id), None)
                 if match and match.status != MatchStatus.FINISHED:
+                    was_calling = match.status == MatchStatus.CALLING
                     if match.is_closed_match:
                         # Closed (貸切枠) は代表グループが不在なら枠ごと破棄
                         match.status = MatchStatus.CANCELLED
@@ -390,11 +415,11 @@ class MatchingEngine:
                         red_player_count = sum(g.headcount for g in remaining_red)
                         blue_player_count = sum(g.headcount for g in remaining_blue)
 
-                        # スロット1 (IN_PROGRESS: 対戦中) および スロット2 (CALLING: 次の試合) では、
-                        # 既に呼出・入場中のため、マッチを解散させずスロットを維持する。
-                        # 両チームに1名以上のプレイヤーが残っていれば、不足人数を「運営スタッフ助っ人」として自動補充！
-                        is_active_slot = match.status in (MatchStatus.CALLING, MatchStatus.IN_PROGRESS)
-                        can_support_with_staff = (red_player_count >= 1 and blue_player_count >= 1)
+                        # スロット2 (CALLING: 次の試合) では、
+                        # 既に呼出中のため、両チームに2名以上のプレイヤーが残っていれば（3v2 または 2v2）、
+                        # マッチを解散させず不足人数（各チーム最大1名）を「運営スタッフ助っ人」として自動補充！
+                        is_active_slot = match.status == MatchStatus.CALLING
+                        can_support_with_staff = (red_player_count >= 2 and blue_player_count >= 2)
 
                         if is_active_slot and can_support_with_staff:
                             # 各チームが3名になるよう、不足分を運営スタッフ助っ人として補充
@@ -418,7 +443,7 @@ class MatchingEngine:
                                 ),
                             )
                         else:
-                            # 片方のチームが0名になった場合、または呼出前の枠で不成立の場合:
+                            # 片方のチームが0名になった場合、または呼出前の枠(SCHEDULED)で不成立の場合:
                             # マッチを解散し、残されたグループを待機キュー最優先（元の created_at を保持）に戻して再マッチングを行う
                             match.status = MatchStatus.CANCELLED
                             for partner in remaining_assigned:
@@ -430,6 +455,24 @@ class MatchingEngine:
                                 partner.status = EntryStatus.WAITING
                                 partner.assigned_match_id = None
                                 partner.updated_at = now
+
+                            # CALLING (2. 次の試合) が解体され相方が待機列先頭に戻った場合、
+                            # 後続の SCHEDULED (3. その次の試合) が相方を追い越して昇格するのを防ぐため、
+                            # SCHEDULED も一旦待機プールに戻して created_at 順で公正に再編成する
+                            if was_calling and remaining_assigned:
+                                for sched_m in self.matches:
+                                    if sched_m.status == MatchStatus.SCHEDULED:
+                                        sched_m.status = MatchStatus.CANCELLED
+                                        for sg in sched_m.assigned_groups:
+                                            s_ent = self._get_entry(sg.id)
+                                            if s_ent and s_ent.status not in (EntryStatus.SKIPPED, EntryStatus.CANCELLED):
+                                                s_ent.status = EntryStatus.WAITING
+                                                s_ent.assigned_match_id = None
+                                                s_ent.updated_at = now
+                                            if sg.status not in (EntryStatus.SKIPPED, EntryStatus.CANCELLED):
+                                                sg.status = EntryStatus.WAITING
+                                                sg.assigned_match_id = None
+                                                sg.updated_at = now
                 target.assigned_match_id = None
 
             # 空いた枠を即座に再計算・繰り上げ
@@ -440,7 +483,11 @@ class MatchingEngine:
     # --------------------------------------------------------------------------
     # 3. 試合進行操作 (Advance)
     # --------------------------------------------------------------------------
-    def advance_match_lifecycle(self, current_time: Optional[datetime] = None) -> bool:
+    def advance_match_lifecycle(
+        self,
+        match_id: Optional[str] = None,
+        current_time: Optional[datetime] = None,
+    ) -> bool:
         with self._lock:
             now = ensure_utc(current_time) if current_time else now_utc()
 
@@ -451,7 +498,26 @@ class MatchingEngine:
             if not current and not next_match and not next_next:
                 return False
 
-            # Current 終了
+            # 特定の試合IDが指定され、それが「1. 現在対戦中 (IN_PROGRESS)」の『試合終了』操作だった場合:
+            # 現在対戦中の試合のみを終了(FINISHED)してフィールド枠を空ける。
+            # 「2. 次の試合 (CALLING)」はまだ受付点呼・不在確認中の可能性があるため勝手に昇格させず、
+            # スタッフが『案内完了』を押したタイミングで昇格させる。
+            if match_id and current and current.id == match_id:
+                current.status = MatchStatus.FINISHED
+                current.ended_at = now
+                for g in current.assigned_groups:
+                    g.status = EntryStatus.COMPLETED
+                    g.updated_at = now
+                    ent = self._get_entry(g.id)
+                    if ent:
+                        ent.status = EntryStatus.COMPLETED
+                        ent.updated_at = now
+                self.recalculate_slots(now)
+                self.save_state()
+                return True
+
+            # 「2. 次の試合 (CALLING)」の『案内完了』、または全体進行の場合:
+            # もし前の「1. 現在対戦中」がまだ終了していなければ自動的に終了させる
             if current:
                 current.status = MatchStatus.FINISHED
                 current.ended_at = now

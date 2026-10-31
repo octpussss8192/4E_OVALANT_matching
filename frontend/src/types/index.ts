@@ -85,6 +85,7 @@ export interface QueueStatusResponse {
   waiting_groups: EntryGroup[];
   all_active_entries?: EntryGroup[];
   all_history_entries?: EntryGroup[];
+  is_local_mode?: boolean;
 }
 
 
