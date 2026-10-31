@@ -14,7 +14,7 @@ import threading
 import uuid
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, NamedTuple
 from .models import (
     EntryGroup,
     EntryStatus,
@@ -39,6 +39,7 @@ def _get_storage_path() -> Path:
         os.environ.get("LOCAL_MODE") == "1"
         or os.environ.get("DISABLE_SUPABASE") == "1"
         or os.environ.get("TESTING") == "1"
+        or os.environ.get("USE_LOCAL_STORAGE", "").lower() in ("true", "1")
     )
     filename = "matching_state_test.json" if is_local else "matching_state.json"
     try:
@@ -47,6 +48,15 @@ def _get_storage_path() -> Path:
     except Exception:
         fallback_dir = Path(tempfile.gettempdir())
         return fallback_dir / f"overter_watch_{filename}"
+
+
+class EngineResult(NamedTuple):
+    success: bool
+    message: str
+    status_code: int
+
+    def __bool__(self) -> bool:
+        return self.success
 
 
 class MatchingEngine:
@@ -65,6 +75,7 @@ class MatchingEngine:
                 os.environ.get("DISABLE_SUPABASE") == "1"
                 or os.environ.get("LOCAL_MODE") == "1"
                 or os.environ.get("TESTING") == "1"
+                or os.environ.get("USE_LOCAL_STORAGE", "").lower() in ("true", "1")
             )
         self._lock = threading.RLock()
 
@@ -372,25 +383,35 @@ class MatchingEngine:
         reason: str = "呼び出し時不在のためスキップ",
         current_time: Optional[datetime] = None,
     ) -> bool:
+        return self.skip_entry_with_detail(entry_id, reason, current_time).success
+
+    def skip_entry_with_detail(
+        self,
+        entry_id: str,
+        reason: str = "呼び出し時不在のためスキップ",
+        current_time: Optional[datetime] = None,
+    ) -> EngineResult:
         with self._lock:
             now = ensure_utc(current_time) if current_time else now_utc()
             target = self._get_entry(entry_id)
             if not target:
-                return False
+                return EngineResult(False, "指定されたエントリーが見つかりません", 404)
+
+            # 現在対戦中 (IN_PROGRESS) または IN_MATCH はスキップ不可ガード (400 Bad Request)
+            if target.status == EntryStatus.IN_MATCH:
+                return EngineResult(False, "現在対戦中の枠のエントリーはスキップできません", 400)
+
+            if target.assigned_match_id:
+                assigned_m = next((m for m in self.matches if m.id == target.assigned_match_id), None)
+                if assigned_m and assigned_m.status == MatchStatus.IN_PROGRESS:
+                    return EngineResult(False, "現在対戦中の枠のエントリーはスキップできません", 400)
 
             if target.status in (
-                EntryStatus.IN_MATCH,
                 EntryStatus.COMPLETED,
                 EntryStatus.SKIPPED,
                 EntryStatus.CANCELLED,
             ):
-                return False
-
-            # 現在対戦中 (IN_PROGRESS) の試合に属している場合はスキップ不可ガード
-            if target.assigned_match_id:
-                assigned_m = next((m for m in self.matches if m.id == target.assigned_match_id), None)
-                if assigned_m and assigned_m.status == MatchStatus.IN_PROGRESS:
-                    return False
+                return EngineResult(False, "すでに終了またはスキップ済みのエントリーです", 400)
 
             target.status = EntryStatus.SKIPPED
             target.skip_reason = reason
@@ -478,23 +499,45 @@ class MatchingEngine:
             # 空いた枠を即座に再計算・繰り上げ
             self.recalculate_slots(now)
             self.save_state()
-            return True
+            return EngineResult(True, "不在グループをスキップし、枠の再編成を行いました", 200)
 
     def restore_entry(
         self,
         entry_id: str,
         current_time: Optional[datetime] = None,
     ) -> bool:
+        return self.restore_entry_with_detail(entry_id, current_time).success
+
+    def restore_entry_with_detail(
+        self,
+        entry_id: str,
+        current_time: Optional[datetime] = None,
+    ) -> EngineResult:
         """不在スキップされたグループを待機キューの最優先（先頭）に救済・復帰させる"""
         with self._lock:
             now = ensure_utc(current_time) if current_time else now_utc()
             target = self._get_entry(entry_id)
             if not target:
-                return False
+                return EngineResult(False, "指定されたエントリーが見つかりません", 404)
 
             # スキップ状態のものだけが復帰可能（二重復帰や対戦完了・アクティブ枠の誤復帰を防止）
             if target.status != EntryStatus.SKIPPED:
-                return False
+                return EngineResult(False, "スキップ状態のエントリーのみ復帰できます", 400)
+
+            # 同一セッション（同一参加者端末）がすでにアクティブな別整理券を持っている場合は二重エントリー防止
+            active_dups = [
+                e for e in self.entries
+                if e.session_id == target.session_id
+                and e.id != target.id
+                and e.status in (EntryStatus.WAITING, EntryStatus.CALLED, EntryStatus.IN_MATCH)
+            ]
+            if active_dups:
+                dup = active_dups[0]
+                return EngineResult(
+                    False,
+                    f"同一参加者が既に整理券 #{dup.entry_number} で受付中のため復帰できません",
+                    400,
+                )
 
             target.status = EntryStatus.WAITING
             target.skip_reason = None
@@ -507,7 +550,8 @@ class MatchingEngine:
                 earliest_created = min(ensure_utc(e.created_at) for e in waiting_entries)
                 target.created_at = min(ensure_utc(target.created_at), earliest_created - timedelta(seconds=1))
             else:
-                target.created_at = now - timedelta(seconds=1)
+                # 待機列が空の場合でも、元々の登録時刻より新しくならないよう min() を取る（経過時間の権利維持）
+                target.created_at = min(ensure_utc(target.created_at), now - timedelta(seconds=1))
 
             # SCHEDULED (3. その次の試合) が存在する場合、復帰したグループを公正に即時再編成できるよう
             # SCHEDULED を一旦解体して待機列と一緒に再編成する
@@ -527,7 +571,7 @@ class MatchingEngine:
 
             self.recalculate_slots(now)
             self.save_state()
-            return True
+            return EngineResult(True, "不在グループを待機列に復帰し、スロットを再編成しました", 200)
 
     # --------------------------------------------------------------------------
     # 3. 試合進行操作 (Advance)

@@ -30,6 +30,7 @@ def get_supabase_config() -> tuple[str, str]:
         or os.environ.get("TESTING") == "1"
         or os.environ.get("DISABLE_SUPABASE") == "1"
         or os.environ.get("LOCAL_MODE") == "1"
+        or os.environ.get("USE_LOCAL_STORAGE", "").lower() in ("true", "1")
     ):
         return "", ""
 

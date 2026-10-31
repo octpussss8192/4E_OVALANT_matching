@@ -223,7 +223,7 @@ export default function ParticipantPage() {
     return null;
   }, [sessionId]);
 
-  // リアルタイム反映 + 定期ポーリング (3秒毎)
+  // リアルタイム反映 + 定期ポーリング (5秒毎)
   useEffect(() => {
     let isMounted = true;
 
@@ -244,7 +244,7 @@ export default function ParticipantPage() {
 
     refreshCookieEntries();
     poll();
-    const timer = setInterval(poll, 15000);
+    const timer = setInterval(poll, 5000);
     const unsubscribe = subscribeToMatchUpdates(() => {
       poll();
     });
@@ -707,7 +707,7 @@ export default function ParticipantPage() {
                             整理券 #{myEntryInfo.entry.entry_number} : {myEntryInfo.entry.team_name} (
                             <span className="font-bold text-key-900">
                               {isCalled
-                                ? '呼出中！受付へ'
+                                ? '呼出中 (受付へ)'
                                 : isNextNext
                                 ? '次々回枠（まもなく呼出）'
                                 : isInMatch
