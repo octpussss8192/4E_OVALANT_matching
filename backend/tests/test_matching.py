@@ -712,7 +712,8 @@ def test_closed_and_open_fair_fifo_ordering(tmp_path):
     b_4p = eng2.register_entry("sb", "B", "B_4人", 4, PreferenceType.CLOSED, created_at=t + timedelta(seconds=10))
     c_2p = eng2.register_entry("sc", "C", "C_2人", 2, PreferenceType.OPEN, created_at=t + timedelta(seconds=20))
 
-    # Next = B_4人、Next Next = A_2人 + C_2人
+    # 2分経過後に A_2人 + C_2人 も Next Next に成立（Next は B_4人 が先に確保済）
+    eng2.recalculate_slots(current_time=t + timedelta(seconds=125))
     c_m = next(m for m in eng2.matches if m.status == MatchStatus.CALLING)
     s_m = next(m for m in eng2.matches if m.status == MatchStatus.SCHEDULED)
     assert [g.id for g in c_m.assigned_groups] == [b_4p.id]
