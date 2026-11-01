@@ -698,7 +698,6 @@ def test_closed_and_open_fair_fifo_ordering(tmp_path):
 
     # 1試合進めると、次の SCHEDULED には ⑤2人組ではなく ④4人組が入ること！
     eng.advance_match_lifecycle(match_id=calling.id, current_time=t + timedelta(minutes=1))
-    eng.advance_match_lifecycle(match_id=scheduled.id, current_time=t + timedelta(minutes=2))
     new_scheduled = next(m for m in eng.matches if m.status == MatchStatus.SCHEDULED)
     assert [g.id for g in new_scheduled.assigned_groups] == [g4_4p.id]
     assert g5_2p.status == EntryStatus.WAITING
