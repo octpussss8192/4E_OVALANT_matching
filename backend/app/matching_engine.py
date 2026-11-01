@@ -184,7 +184,16 @@ class MatchingEngine:
                     e.assigned_match_id = None
                 healed = True
 
-        if healed:
+        has_waiting = any(e.status == EntryStatus.WAITING for e in self.entries)
+        has_calling = any(m.status == MatchStatus.CALLING for m in self.matches)
+        has_scheduled = any(m.status == MatchStatus.SCHEDULED for m in self.matches)
+        if has_waiting and (not has_calling or not has_scheduled):
+            before_matches = [(m.id, m.status) for m in self.matches]
+            self.recalculate_slots()
+            after_matches = [(m.id, m.status) for m in self.matches]
+            if before_matches != after_matches:
+                healed = True
+        elif healed:
             self.recalculate_slots()
 
         return healed
