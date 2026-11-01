@@ -15,7 +15,7 @@ from .matching_engine import MatchingEngine
 router = APIRouter(prefix="/api")
 
 # シングルトンマッチングエンジンインスタンス
-engine = MatchingEngine(flexible_wait_seconds=600)
+engine = MatchingEngine(flexible_wait_seconds=0)
 
 
 def _ensure_state_loaded(require_fresh: bool = False) -> None:

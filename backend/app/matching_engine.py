@@ -62,7 +62,7 @@ class EngineResult(NamedTuple):
 class MatchingEngine:
     def __init__(
         self,
-        flexible_wait_seconds: int = 600,
+        flexible_wait_seconds: int = 0,
         storage_path: Optional[Path] = None,
         disable_supabase: Optional[bool] = None,
     ):
@@ -681,6 +681,35 @@ class MatchingEngine:
                     ent.updated_at = now
             calling_match = scheduled_match
             scheduled_match = None
+
+        # 既存の CALLING / SCHEDULED の Open 枠に空き（5名または4名でスタッフ補充中）がある場合、
+        # 待機列の Open グループがそのまま不足枠に収まるなら自動合流させて6名フルマッチに昇格させる
+        for active_m in (calling_match, scheduled_match):
+            if active_m and not active_m.is_closed_match and active_m.teams and active_m.total_players < 6:
+                open_waiters = [
+                    e for e in self.entries
+                    if e.status == EntryStatus.WAITING and e.preference == PreferenceType.OPEN
+                ]
+                open_waiters.sort(key=lambda x: ensure_utc(x.created_at))
+                for g in open_waiters:
+                    target_side = None
+                    if active_m.teams.red.total_count + g.headcount <= 3 and (
+                        active_m.teams.red.total_count <= active_m.teams.blue.total_count
+                        or active_m.teams.blue.total_count + g.headcount > 3
+                    ):
+                        target_side = active_m.teams.red
+                    elif active_m.teams.blue.total_count + g.headcount <= 3:
+                        target_side = active_m.teams.blue
+
+                    if target_side is not None:
+                        g.status = EntryStatus.CALLED
+                        g.assigned_match_id = active_m.id
+                        g.updated_at = now
+                        target_side.groups.append(g)
+                        target_side.total_count += g.headcount
+                        target_side.staff_count = max(0, 3 - target_side.total_count)
+                        active_m.assigned_groups.append(g)
+                        active_m.total_players = active_m.teams.red.total_count + active_m.teams.blue.total_count
 
         waiting_pool = [
             e for e in self.entries if e.status == EntryStatus.WAITING

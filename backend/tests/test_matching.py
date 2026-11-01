@@ -77,7 +77,8 @@ def test_open_matching_no_group_split_3_2_1():
         },
     )
     assert r2.status_code == 200
-    assert r2.json()["slot_name"] == "waiting"
+    # 0秒即時マッチングにより3名+2名の時点でまずNext枠に割当、直後の1名組がそこへ自動合流する
+    assert r2.json()["slot_name"] == "next"
 
     # 3組目: 1名 Open (合計6名到達！)
     r3 = client.post(
