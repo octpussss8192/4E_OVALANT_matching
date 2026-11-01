@@ -671,3 +671,50 @@ def test_restore_skipped_entry_to_front_of_queue():
     # 4. すでにアクティブなグループに対する二重復帰は400で拒否されること
     restore_again = client.post(f"/api/admin/entries/{g1_id}/restore")
     assert restore_again.status_code == 400
+
+
+def test_closed_and_open_fair_fifo_ordering(tmp_path):
+    """1) [4人, 2人, 2人, 4人, 2人] の順に入った場合:
+          ①4人 -> ②2人+③2人 -> ④4人 の順になり、⑤あとから来た2人が④4人を追い越さないこと。
+       2) [2人, 4人, 2人] の順に入った場合:
+          ①2人だけでは試合が組めないため②4人が先に入り、あとから来た③2人が②4人を追い越さないこと。"""
+    eng = MatchingEngine(
+        flexible_wait_seconds=120,
+        storage_path=tmp_path / "fair_order.json",
+        disable_supabase=True,
+    )
+    t = datetime(2026, 11, 1, 10, 0, 0)
+    g1_4p = eng.register_entry("s1", "L1", "1_4人組", 4, PreferenceType.CLOSED, created_at=t)
+    g2_2p = eng.register_entry("s2", "L2", "2_2人組", 2, PreferenceType.OPEN, created_at=t + timedelta(seconds=10))
+    g3_2p = eng.register_entry("s3", "L3", "3_2人組", 2, PreferenceType.OPEN, created_at=t + timedelta(seconds=20))
+    g4_4p = eng.register_entry("s4", "L4", "4_4人組", 4, PreferenceType.CLOSED, created_at=t + timedelta(seconds=30))
+    g5_2p = eng.register_entry("s5", "L5", "5_2人組", 2, PreferenceType.OPEN, created_at=t + timedelta(seconds=40))
+
+    # Next = ①4人組、Next Next = ②2人組 + ③2人組（④4人組が②+③を追い越さず、⑤2人組も混ざらない）
+    calling = next(m for m in eng.matches if m.status == MatchStatus.CALLING)
+    scheduled = next(m for m in eng.matches if m.status == MatchStatus.SCHEDULED)
+    assert [g.id for g in calling.assigned_groups] == [g1_4p.id]
+    assert {g.id for g in scheduled.assigned_groups} == {g2_2p.id, g3_2p.id}
+
+    # 1試合進めると、次の SCHEDULED には ⑤2人組ではなく ④4人組が入ること！
+    eng.advance_match_lifecycle(match_id=calling.id, current_time=t + timedelta(minutes=1))
+    eng.advance_match_lifecycle(match_id=scheduled.id, current_time=t + timedelta(minutes=2))
+    new_scheduled = next(m for m in eng.matches if m.status == MatchStatus.SCHEDULED)
+    assert [g.id for g in new_scheduled.assigned_groups] == [g4_4p.id]
+    assert g5_2p.status == EntryStatus.WAITING
+
+    # ケース2: [2人(A) -> 4人(B) -> 2人(C)] の順に入った場合、あとから来た 2人(C) が 4人(B) を追い越さないこと
+    eng2 = MatchingEngine(
+        flexible_wait_seconds=120,
+        storage_path=tmp_path / "fair_order2.json",
+        disable_supabase=True,
+    )
+    a_2p = eng2.register_entry("sa", "A", "A_2人", 2, PreferenceType.OPEN, created_at=t)
+    b_4p = eng2.register_entry("sb", "B", "B_4人", 4, PreferenceType.CLOSED, created_at=t + timedelta(seconds=10))
+    c_2p = eng2.register_entry("sc", "C", "C_2人", 2, PreferenceType.OPEN, created_at=t + timedelta(seconds=20))
+
+    # Next = B_4人、Next Next = A_2人 + C_2人
+    c_m = next(m for m in eng2.matches if m.status == MatchStatus.CALLING)
+    s_m = next(m for m in eng2.matches if m.status == MatchStatus.SCHEDULED)
+    assert [g.id for g in c_m.assigned_groups] == [b_4p.id]
+    assert {g.id for g in s_m.assigned_groups} == {a_2p.id, c_2p.id}

@@ -770,7 +770,20 @@ class MatchingEngine:
             return self._create_closed_match(first_group, current_time)
 
         # Case B: 先頭が Open の場合
-        open_groups = [g for g in waiting_pool if g.preference == PreferenceType.OPEN]
+        # 後続に Closed (4〜6名貸切) が待っている場合、その Closed より「後」に受付した Open 組を引っ張ってきて
+        # Closed 組を追い越すことがないよう、まず Closed より前に並んでいる Open 組だけで成立するか判定する
+        closed_groups = [g for g in waiting_pool if g.preference == PreferenceType.CLOSED]
+        first_closed = closed_groups[0] if closed_groups else None
+
+        if first_closed is not None:
+            open_groups = [
+                g for g in waiting_pool
+                if g.preference == PreferenceType.OPEN
+                and ensure_utc(g.created_at) <= ensure_utc(first_closed.created_at)
+            ]
+        else:
+            open_groups = [g for g in waiting_pool if g.preference == PreferenceType.OPEN]
+
         if open_groups:
             target_g0 = open_groups[0]
             candidates = open_groups[1:]
@@ -781,9 +794,9 @@ class MatchingEngine:
                 red_groups, blue_groups = combo_6
                 return self._create_open_match(red_groups, blue_groups, current_time)
 
-            # 待機時間が閾値（flexible_wait_seconds）を超過しているか判定
+            # 待機時間が閾値を超過している場合、または後ろに Closed 組が迫っていて既にペアが揃っている場合
             wait_seconds = (ensure_utc(current_time) - ensure_utc(target_g0.created_at)).total_seconds()
-            if wait_seconds >= self.flexible_wait_seconds:
+            if wait_seconds >= self.flexible_wait_seconds or first_closed is not None:
                 # 優先度 2: 5名マッチング (Red 3名 vs Blue 2名 または Red 2名 vs Blue 3名 + スタッフ1名補充)
                 combo_5 = self._search_open_teams(target_g0, candidates, target_red=3, target_blue=2)
                 if not combo_5:
@@ -798,11 +811,10 @@ class MatchingEngine:
                     red_groups, blue_groups = combo_4
                     return self._create_open_match(red_groups, blue_groups, current_time)
 
-        # Case C: 先頭の Open グループが人数不足で成立しない場合、
-        # 後続に単独で枠に入れる Closed (貸切内戦・4名以上) があればスロットを優先的に割当
-        closed_groups = [g for g in waiting_pool if g.preference == PreferenceType.CLOSED]
-        if closed_groups:
-            return self._create_closed_match(closed_groups[0], current_time)
+        # Case C: first_closed より前の Open 組だけでは試合が組めない場合（例: 2人組が1組だけぽつんと待っている場合）、
+        # 後から来た別の2人組に追い越させず、すでに揃っている Closed 組を先にスロットへ割り当てる
+        if first_closed is not None:
+            return self._create_closed_match(first_closed, current_time)
 
         return None
 
