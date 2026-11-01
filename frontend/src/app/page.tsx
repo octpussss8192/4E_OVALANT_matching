@@ -631,19 +631,12 @@ export default function ParticipantPage() {
               </div>
 
               {/* 定義リスト（dl/dt/dd）によるクリーンな情報表示 */}
-              <dl className="border-t border-solid-gray-200 mt-4 pt-4 grid grid-cols-2 gap-4 text-center">
+              <dl className="border-t border-solid-gray-200 mt-4 pt-4 text-center">
                 <div className="py-2">
                   <dt className="text-xs text-solid-gray-600">前の待機組数</dt>
                   <dd className="text-3xl font-bold text-solid-gray-900 mt-1">
                     {myEntryInfo.ahead_groups_count}
                     <span className="text-sm font-normal ml-1">組</span>
-                  </dd>
-                </div>
-                <div className="py-2 border-l border-solid-gray-200">
-                  <dt className="text-xs text-solid-gray-600">予想待ち時間</dt>
-                  <dd className="text-3xl font-bold text-solid-gray-900 mt-1">
-                    約 {myEntryInfo.estimated_wait_minutes}
-                    <span className="text-sm font-normal ml-1">分</span>
                   </dd>
                 </div>
               </dl>

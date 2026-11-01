@@ -62,7 +62,7 @@ class EngineResult(NamedTuple):
 class MatchingEngine:
     def __init__(
         self,
-        flexible_wait_seconds: int = 0,
+        flexible_wait_seconds: int = 120,
         storage_path: Optional[Path] = None,
         disable_supabase: Optional[bool] = None,
     ):
